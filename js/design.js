@@ -33,9 +33,9 @@ export const DEFAULTS = {
   rafterSpacing: 24,
   purlinSpacing: 24,
   wallPly: 'ply14',
-  doorsFront: 2,
-  doorsBack: 1,
-  doorsSide: 1,
+  // door per bay between columns, per wall (bays left→right seen from outside):
+  // front-back-left-right, '1' = door
+  doorBays: '101-010-010-010',
   doorW: 32,
   doorH: 80,
   winSpacing: 10, // ft
@@ -205,6 +205,23 @@ function sheetRun(L) {
   return out;
 }
 
+export const WALL_KEYS = ['front', 'back', 'left', 'right'];
+
+// '101-010-010-010' → { front: [true,false,true], ... }, padded to nBays.
+export function parseDoorBays(str, nBays) {
+  const parts = String(str || '').split('-');
+  const out = {};
+  WALL_KEYS.forEach((k, i) => {
+    const bits = parts[i] || '';
+    out[k] = Array.from({ length: nBays }, (_, j) => bits[j] === '1');
+  });
+  return out;
+}
+
+export function formatDoorBays(map) {
+  return WALL_KEYS.map((k) => map[k].map((b) => (b ? '1' : '0')).join('')).join('-');
+}
+
 export function design(P) {
   const b = new Builder();
   const W = P.width * 12;
@@ -260,7 +277,7 @@ export function design(P) {
   if (sill + winRO.h + 1.5 > Rb - 1.5) sill = Rb - 3 - winRO.h;
   if (sill < PH + 3) warnings.push(`A ${P.windowH}' louvre doesn't fit between the pony wall and the ring beam.`);
   const S = P.winSpacing * 12;
-  const doorCount = { front: P.doorsFront, back: P.doorsBack, left: P.doorsSide, right: P.doorsSide };
+  const doorMap = parseDoorBays(P.doorBays, m + 1);
   for (const w of Object.values(walls)) {
     w.cols.push([0, C]);
     for (let i = 1; i <= m; i++) {
@@ -270,16 +287,14 @@ export function design(P) {
     w.cols.push([w.L - C, w.L]);
     for (let i = 0; i + 1 < w.cols.length; i++) w.bays.push([w.cols[i][1], w.cols[i + 1][0]]);
     const zones = [];
-    const nd = doorCount[w.key];
-    const fit = w.bays.filter(([a, c]) => c - a >= doorRO.w + 3);
-    const n = Math.min(nd, fit.length);
-    if (n < nd) warnings.push(`Only ${n} of ${nd} door${nd === 1 ? '' : 's'} fit on the ${w.key} wall (one per bay between columns).`);
-    const used = new Set();
-    for (let k = 0; k < n; k++) {
-      let idx = Math.min(fit.length - 1, Math.max(0, Math.round(((k + 0.5) * fit.length) / n - 0.5)));
-      while (used.has(idx)) idx = (idx + 1) % fit.length;
-      used.add(idx);
-      const [a, c] = fit[idx];
+    w.doorFits = w.bays.map(([a, c]) => c - a >= doorRO.w + 3);
+    for (let idx = 0; idx < w.bays.length; idx++) {
+      if (!doorMap[w.key][idx]) continue;
+      const [a, c] = w.bays[idx];
+      if (!w.doorFits[idx]) {
+        warnings.push(`A door doesn't fit in bay ${idx + 1} of the ${w.key} wall (${ftin(c - a)} clear).`);
+        continue;
+      }
       const t = (a + c) / 2;
       w.openings.push({ type: 'door', u0: t - doorRO.w / 2, u1: t + doorRO.w / 2, v0: 0, v1: doorRO.h });
       zones.push([t - doorRO.w / 2 - 1.5, t + doorRO.w / 2 + 1.5, 'door']);
@@ -704,7 +719,7 @@ export function design(P) {
   const nColumns = colWorld.length;
   const bayList = walls.front.bays.map(([a, c]) => ftin(c - a)).join(', ');
   const endBays = walls.left.bays.map(([a, c]) => ftin(c - a)).join(', ');
-  const doorDesc = [P.doorsFront && `${P.doorsFront} in the front wall`, P.doorsBack && `${P.doorsBack} in the back wall`, P.doorsSide && `${P.doorsSide} in each end wall`].filter(Boolean).join(', ');
+  const doorDesc = Object.values(walls).map((w) => [w.key, w.openings.filter((o) => o.type === 'door').length]).filter(([, n]) => n).map(([k, n]) => `${n} in the ${k} wall`).join(', ');
   const count = (k, t) => walls[k].openings.filter((o) => o.type === t).length;
   const steps = [
     { title: 'Existing concrete frame', text: `Already built: a ${ftin(W)} × ${ftin(D)} concrete outline, ${inch(Pt)} thick. On it are pony walls ${ftin(PH)} high and ${nColumns} columns (${inch(C)} × ${inch(C)}: the corners plus ${m} along each wall), with a ${inch(P.ringH)} ring beam whose underside is ${ftin(Rb)} above the floor. Before ordering, check: both diagonals ${ftin(diag)}; the clear bays between columns (long walls ${bayList}; end walls ${endBays}); and the ring-beam height. Adjust the inputs to match what was actually poured.` },
@@ -735,6 +750,7 @@ export function design(P) {
       lumber: b.lumber, wallPly: { type: P.wallPly, pieces: wallPlyPieces }, tin: tinPieces, ridgePieces, windows: winList,
       concreteFt3, cementNet, rebar, plasticFt2, wedge, screws, ties, n16, n8, nPanel, roofFast, doors: nDoors,
     },
+    doorGrid: Object.fromEntries(Object.values(walls).map((w) => [w.key, w.bays.map(([a, c], i) => ({ width: c - a, fits: w.doorFits[i], door: w.openings.some((o) => o.type === 'door' && o.u0 >= a && o.u1 <= c) }))])),
     info: {
       columns: nColumns, midPosts: m, rafterSize, diag, floorArea, roofPlanFt2, rainGal, sill, nWin, nDoors, concreteFt3,
       ridgeHeight: roofTop(D / 2), leafH, bayList, endBays,

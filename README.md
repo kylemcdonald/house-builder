@@ -22,7 +22,7 @@ Every dimension of the existing concrete can be set to match what was actually p
 
 - **3D model** (three.js) with two looks: a flat **SketchUp-style** view with outlines, and a **realistic** view with procedural wood, concrete, galvanised steel, PVC, plywood and sand, sky lighting, shadows and ambient occlusion.
 - **Gable roof** in **metal or PVC "tinroof"**; outer walls in the same material and inner walls in plywood.
-- **Doors and windows**: set the number of doors per wall. Doors are centred in the bays between columns. Windows are spread along every wall no further apart than a maximum spacing you choose.
+- **Doors and windows**: tick boxes in a wall × bay grid to put a door in any bay between columns; each door is centred in its bay. Windows are spread along every wall no further apart than a maximum spacing you choose.
 - **Existing concrete inputs**: column count and size, pony wall height and thickness, and ring beam height. There is an optional new floor slab with a rebar grid and plastic underlay.
 - **Explode slider** that separates the building into its layers.
 - **Construction playback**: 13 steps, from the existing concrete through the floor, wall plates, infill walls, roof, siding, windows and doors, to the interior plywood. Each step has a written explanation that uses the real dimensions and quantities.

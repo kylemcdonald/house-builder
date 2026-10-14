@@ -1,4 +1,4 @@
-import { design, DEFAULTS, STEP } from './design.js';
+import { design, DEFAULTS, STEP, WALL_KEYS, parseDoorBays, formatDoorBays } from './design.js';
 import { computeBOM, shoppingList } from './bom.js';
 import { shippingLayout } from './shipping.js';
 import { Viewer } from './viewer.js';
@@ -48,9 +48,7 @@ const plyOpts = Object.entries(PLY).map(([k, v]) => [k, v.name]);
 const ADV = [
   {
     title: 'Doors & windows', open: true, fields: [
-      { k: 'doorsFront', label: 'Doors on front (long) wall', type: 'num', min: 0, max: 6 },
-      { k: 'doorsBack', label: 'Doors on back (long) wall', type: 'num', min: 0, max: 6 },
-      { k: 'doorsSide', label: 'Doors on each end wall', type: 'num', min: 0, max: 4 },
+      { k: 'doorBays', type: 'doorgrid' },
       { k: 'winSpacing', label: 'Max window spacing', min: 4, max: 30, step: 0.5, fmt: (v) => ftin(v * 12), hint: 'Windows are spread along every wall no further apart than this; doors take the place of a window' },
       { k: 'windowW', label: 'Louvre blade length (window width)', type: 'select', opts: [[3, '3 ft'], [4, '4 ft']] },
       { k: 'windowH', label: 'Louvre frame height', type: 'select', opts: [[3, '3 ft'], [4, '4 ft']] },
@@ -120,6 +118,11 @@ function buildAdvanced() {
     for (const f of g.fields) {
       const d = document.createElement('div');
       d.className = 'field' + (f.type === 'pct' || f.type === 'num' ? ' row' : '');
+      if (f.type === 'doorgrid') {
+        d.innerHTML = `<label>Doors</label><div class="door-grid" id="doorGrid"></div><div class="hint">One box per bay between columns, numbered left → right as seen from outside. Greyed bays are too narrow for a door.</div>`;
+        det.appendChild(d);
+        continue;
+      }
       if (f.type === 'select') {
         d.innerHTML = `<label for="f-${f.k}">${f.label}</label><select id="f-${f.k}">${f.opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
       } else if (f.type === 'pct' || f.type === 'num') {
@@ -149,6 +152,7 @@ function syncControls() {
   $$('.seg[data-param]').forEach((s) => s.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === P[s.dataset.param])));
   for (const g of ADV) {
     for (const f of g.fields) {
+      if (f.type === 'doorgrid') continue;
       const el = $('#f-' + f.k);
       if (document.activeElement !== el) el.value = P[f.k];
       const v = $('#v-' + f.k);
@@ -156,6 +160,31 @@ function syncControls() {
     }
   }
   $$('#renderSeg button, #renderSeg2 button').forEach((b) => b.classList.toggle('on', b.dataset.v === renderMode));
+}
+
+const WALL_LABEL = { front: 'Front', back: 'Back', left: 'Left end', right: 'Right end' };
+function renderDoorGrid() {
+  const host = $('#doorGrid');
+  if (!host || !D) return;
+  const nb = P.midPosts + 1;
+  const map = parseDoorBays(P.doorBays, nb);
+  let h = `<div class="dg-row dg-head"><span></span>${Array.from({ length: nb }, (_, j) => `<span>${j + 1}</span>`).join('')}</div>`;
+  for (const k of WALL_KEYS) {
+    h += `<div class="dg-row"><span class="dg-wall">${WALL_LABEL[k]}</span>`;
+    D.doorGrid[k].forEach((bay, j) => {
+      const tip = `${WALL_LABEL[k]} wall, bay ${j + 1}: ${ftin(bay.width)} clear${bay.fits ? '' : ' — too narrow for a door'}`;
+      h += `<label class="dg-cell${bay.fits ? '' : ' dg-bad'}" title="${tip}"><input type="checkbox" data-wall="${k}" data-bay="${j}"${map[k][j] ? ' checked' : ''}${!bay.fits && !map[k][j] ? ' disabled' : ''}></label>`;
+    });
+    h += `</div>`;
+  }
+  host.style.setProperty('--nb', nb);
+  host.innerHTML = h;
+  host.querySelectorAll('input').forEach((cb) => cb.addEventListener('change', () => {
+    const m2 = parseDoorBays(P.doorBays, nb);
+    m2[cb.dataset.wall][Number(cb.dataset.bay)] = cb.checked;
+    P.doorBays = formatDoorBays(m2);
+    schedule();
+  }));
 }
 
 // ------------------------------------------------------------ viewers
@@ -194,6 +223,7 @@ function regenerate() {
   shipDirty = true;
   if (activeTab === 'ship') updateShip();
   updateStepUI();
+  renderDoorGrid();
   renderBOM();
   renderNotes();
   $('#subtitle').textContent = `${ftin(D.W)} × ${ftin(D.D)} on the existing concrete frame · ${D.info.nDoors} doors · ${D.info.nWin} windows`;
@@ -458,7 +488,7 @@ function renderNotes() {
     ['Infill walls', `2x4 @ ${P.studSpacing}" o.c. between the columns, ${PLY[P.wallPly].name} inside, ${P.cladding === 'pvc' ? 'PVC' : 'metal'} corrugated outside`],
     ['Roof', `Gable ${P.pitch}:12 on a 2x6 plate bolted to the ring beam, ${i.rafterSize} rafters @ ${P.rafterSpacing}" o.c., 2x4 purlins`],
     ['Ridge height', `${ftin(i.ridgeHeight)} above grade`],
-    ['Doors', `${i.nDoors} (${P.doorsFront} front, ${P.doorsBack} back, ${P.doorsSide} on each end), ${inch(P.doorW)} × ${ftin(i.leafH)}`],
+    ['Doors', `${i.nDoors}, ${inch(P.doorW)} × ${ftin(i.leafH)} (${WALL_KEYS.map((k) => `${k}: ${D.doorGrid[k].map((b, j) => (b.door ? `bay ${j + 1}` : null)).filter(Boolean).join(' & ') || 'none'}`).join('; ')})`],
     ['Windows', `${i.nWin} aluminium louvre windows, ${P.windowW}' × ${P.windowH}', at most ${ftin(P.winSpacing * 12)} apart, sill at ${ftin(i.sill)}`],
     ['Layout diagonal', ftin(i.diag)],
     ['Rainwater', `≈ ${num(i.rainGal)} gal per inch of rain off ${num(i.roofPlanFt2)} sq ft of roof`],

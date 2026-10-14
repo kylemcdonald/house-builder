@@ -10,46 +10,50 @@ import { LUMBER, PLY, BAG_YIELD_FT3 } from './catalog.js';
 import { ftin, inch, num } from './format.js';
 
 export const DEFAULTS = {
-  width: 36, // ft
+  width: 36, // ft, outside of the concrete outline
   depth: 17, // ft
   cladding: 'metal', // 'metal' | 'pvc'
-  foundation: 'slab', // 'slab' (solid) | 'edge' (4" slab with thickened edge)
-  slabT: 12, // foundation thickness (solid slab, or edge-beam depth), in
-  slabAbove: 6, // top of slab above grade, in
-  wallHeight: 96, // slab to top of top plate, in
-  pitch: 4, // rise per 12
-  eave: 12, // eave overhang, in
-  rake: 6, // gable overhang, in
-  midPosts: 2, // posts between the corners on each wall
+  // existing concrete frame
+  floorAbove: 6, // finished floor above grade, in
+  ponyT: 6, // perimeter outline / pony wall thickness, in
+  ponyH: 24, // pony wall height above the floor, in
+  colSize: 9, // square concrete columns, in
+  midPosts: 2, // columns between the corners on each wall
+  ringBottom: 84, // underside of the ring beam above the floor, in
+  ringH: 9, // ring beam height, in
+  // new floor slab inside the outline
+  floorSlab: 'yes',
+  floorSlabT: 4,
+  rebarSpacing: 24,
+  // roof
+  pitch: 4,
+  eave: 12,
+  rake: 6,
   studSpacing: 24,
   rafterSpacing: 24,
   purlinSpacing: 24,
-  embed: 36, // post depth below top of slab, in
-  holeDia: 16, // post footing hole diameter, in
-  rebarSpacing: 18, // slab rebar grid, in
   wallPly: 'ply14',
   doorsFront: 2,
   doorsBack: 1,
-  doorsSide: 1, // on each end wall
+  doorsSide: 1,
   doorW: 32,
   doorH: 80,
-  winSpacing: 10, // max window spacing along a wall, ft
-  windowW: 3, // louvre blade length, ft
-  windowH: 4, // louvre frame height, ft
-  sill: 30, // window sill height above floor, in
-  tinCover: 30, // effective cover width of a corrugated sheet, in
+  winSpacing: 10, // ft
+  windowW: 3,
+  windowH: 4,
+  sill: 30,
+  tinCover: 30,
   ovTin: 10,
   ovPly: 10,
   ovFraming: 10,
-  ovPosts: 5,
   ovFasteners: 15,
   ovCement: 15,
-  freight: 0, // $ per cubic foot
+  freight: 0,
 };
 
 export const STEP = {
-  SITE: 0, LAYOUT: 1, DIG: 2, POSTS: 3, SLAB: 4, WALL_BACK: 5, WALL_FRONT: 6, WALL_ENDS: 7,
-  ROOF_FRAME: 8, PURLINS: 9, ROOFING: 10, SIDING: 11, WINDOWS: 12, DOOR: 13, INTERIOR: 14, DONE: 15,
+  SITE: 0, FLOOR_PREP: 1, FLOOR: 2, PLATES: 3, WALL_LONG: 4, WALL_ENDS: 5, ROOF_FRAME: 6,
+  PURLINS: 7, ROOFING: 8, SIDING: 9, WINDOWS: 10, DOOR: 11, INTERIOR: 12, DONE: 13,
 };
 
 const EX = 24; // explode unit, inches
@@ -209,32 +213,37 @@ export function design(P) {
   const theta = Math.atan(p);
   const cos = Math.cos(theta);
   const sin = Math.sin(theta);
-  const y0 = P.slabAbove; // floor = top of slab
-  const H = P.wallHeight;
+  const y0 = P.floorAbove; // finished floor
+  const Pt = P.ponyT;
+  const PH = P.ponyH;
+  const C = P.colSize;
+  const Rb = P.ringBottom;
+  const ringTop = Rb + P.ringH;
   const E = P.eave;
   const R = P.rake;
   const tinW = P.tinCover + 3;
   const warnings = [];
-  const edge = P.foundation === 'edge';
-  const slabCore = edge ? 4 : P.slabT;
-  const yS0 = y0 - P.slabT; // bottom of slab / edge beam
+  const m = P.midPosts;
+  const pw = 5.5; // 2x6 wall plate on the ring beam
+  const yTop = y0 + ringTop + 1.5; // top of wall plate
 
-  const rafterSpanH = D / 2 - 3.5;
+  const rafterSpanH = D / 2 - pw;
   const rafterSize = rafterSpanH > 84 ? '2x6' : '2x4';
   const rd = LUMBER[rafterSize].w;
-  const yTop = y0 + H;
-  const underside = (z) => yTop + (Math.min(z, D - z) - 3.5) * p;
+  const underside = (z) => yTop + (Math.min(z, D - z) - pw) * p;
   const rafterTop = (z) => underside(z) + rd / cos;
   const roofTop = (z) => rafterTop(z) + 1.5 / cos; // top of the purlins
 
   // ---------------------------------------------------------------- walls & openings
-  const mkWall = (key, O, U, n, L, ua, ub, sideTop, step) => ({ key, O, U, n, L, ua, ub, top: () => H, sideTop, step, posts: [], openings: [] });
+  const mkWall = (key, O, U, n, L, step) => ({ key, O, U, n, L, step, cols: [], bays: [], openings: [] });
   const walls = {
-    back: mkWall('back', V(W, y0, 0), V(-1, 0, 0), V(0, 0, -1), W, 0, W, () => H, STEP.WALL_BACK),
-    front: mkWall('front', V(0, y0, D), V(1, 0, 0), V(0, 0, 1), W, 0, W, () => H, STEP.WALL_FRONT),
-    left: mkWall('left', V(0, y0, 0), V(0, 0, 1), V(-1, 0, 0), D, 3.5, D - 3.5, (u) => rafterTop(u) - y0, STEP.WALL_ENDS),
-    right: mkWall('right', V(W, y0, D), V(0, 0, -1), V(1, 0, 0), D, 3.5, D - 3.5, (u) => rafterTop(D - u) - y0, STEP.WALL_ENDS),
+    back: mkWall('back', V(W, y0, 0), V(-1, 0, 0), V(0, 0, -1), W, STEP.WALL_LONG),
+    front: mkWall('front', V(0, y0, D), V(1, 0, 0), V(0, 0, 1), W, STEP.WALL_LONG),
+    left: mkWall('left', V(0, y0, 0), V(0, 0, 1), V(-1, 0, 0), D, STEP.WALL_ENDS),
+    right: mkWall('right', V(W, y0, D), V(0, 0, -1), V(1, 0, 0), D, STEP.WALL_ENDS),
   };
+  walls.left.sideTop = (u) => rafterTop(u) - y0;
+  walls.right.sideTop = (u) => rafterTop(D - u) - y0;
   const toW = (w, u, v, d) => w.O.clone().addScaledVector(w.U, u).addScaledVector(UP, v).addScaledVector(w.n, -d);
   const wallBox = (w, u0, u1, v0, v1, d0, d1) => {
     const a = toW(w, u0, v0, d0);
@@ -243,313 +252,212 @@ export function design(P) {
   };
   const wallEx = (w, out, layer) => [w.n.x * out * EX, layer * EX, w.n.z * out * EX];
 
-  const m = P.midPosts;
   const winRO = { w: P.windowW * 12 + 1, h: P.windowH * 12 + 1 };
-  const doorRO = { w: P.doorW + 2, h: P.doorH + 1.5 };
-  let sill = P.sill;
-  if (sill + winRO.h + 5.5 > H - 4.5) {
-    sill = Math.max(12, H - 4.5 - 5.5 - winRO.h);
-    warnings.push(`Window sill lowered to ${inch(sill)} to fit under the wall plate.`);
-  }
+  const doorRO = { w: P.doorW + 2, h: Math.min(P.doorH + 1.5, Rb - 1.5) };
+  const leafH = doorRO.h - 1.5;
+  if (leafH < P.doorH - 0.01) warnings.push(`The ring beam is low: doors can only be ${inch(leafH)} tall.`);
+  let sill = Math.max(P.sill, PH + 3);
+  if (sill + winRO.h + 1.5 > Rb - 1.5) sill = Rb - 3 - winRO.h;
+  if (sill < PH + 3) warnings.push(`A ${P.windowH}' louvre doesn't fit between the pony wall and the ring beam.`);
   const S = P.winSpacing * 12;
   const doorCount = { front: P.doorsFront, back: P.doorsBack, left: P.doorsSide, right: P.doorsSide };
-  // Doors go in the bays between posts; windows are spread so they are never
-  // more than S apart. Mid-wall posts slide sideways to clear an opening.
   for (const w of Object.values(walls)) {
-    const long = w.key === 'front' || w.key === 'back';
-    const lo = long ? 5.5 : 3.5; // inside face of the corner post / corner studs
-    const hi = w.L - lo;
-    const c0 = long ? 2.75 : 1.5;
-    const posts = [];
-    for (let i = 1; i <= m; i++) posts.push(c0 + (i * (w.L - 2 * c0)) / (m + 1));
-    const zones = []; // [a, b, type]
-    const free = (a, c, ignorePost = -1) => a >= lo - 1e-6 && c <= hi + 1e-6
-      && !zones.some(([za, zc]) => overlaps(a, c, za, zc))
-      && !posts.some((pc, i) => i !== ignorePost && overlaps(a, c, pc - 2.75, pc + 2.75));
-    // try to open [a,c] by moving posts that are in the way
-    const clearFor = (a, c) => {
-      const moved = posts.slice();
-      for (let i = 0; i < posts.length; i++) {
-        if (!overlaps(a, c, posts[i] - 2.75, posts[i] + 2.75)) continue;
-        const left = a - 2.75;
-        const right = c + 2.75;
-        const opts = Math.abs(left - posts[i]) < Math.abs(right - posts[i]) ? [left, right] : [right, left];
-        const ok = opts.find((pc) => pc - 2.75 >= lo - 5.5 - 1e-6 && pc + 2.75 <= hi + 5.5 + 1e-6
-          && !zones.some(([za, zc]) => overlaps(pc - 2.75, pc + 2.75, za, zc))
-          && !moved.some((q, j) => j !== i && overlaps(pc - 2.75, pc + 2.75, q - 2.75, q + 2.75))
-          && pc - 2.75 >= (long ? 5.5 : 3.5) - 1e-6 && pc + 2.75 <= w.L - (long ? 5.5 : 3.5) + 1e-6);
-        if (ok === undefined) return false;
-        moved[i] = ok;
-      }
-      posts.splice(0, posts.length, ...moved);
-      return true;
-    };
-    const nd = doorCount[w.key];
-    const hz = doorRO.w / 2 + 3;
-    let placed = 0;
-    for (let k = 0; k < nd; k++) {
-      // centre of the k-th of nd evenly chosen bays, or evenly spaced
-      const nb = m + 1;
-      const bayW = (w.L - 2 * c0) / nb;
-      let t = nd <= nb ? c0 + (Math.min(nb - 1, Math.max(0, Math.round(((k + 0.5) * nb) / nd - 0.5))) + 0.5) * bayW : lo + ((k + 0.5) * (hi - lo)) / nd;
-      t = Math.min(hi - hz, Math.max(lo + hz, t));
-      if (zones.some(([za, zc]) => overlaps(t - hz, t + hz, za, zc)) || !clearFor(t - hz, t + hz)) continue;
-      w.openings.push({ type: 'door', u0: t - doorRO.w / 2, u1: t + doorRO.w / 2, v0: 0, v1: doorRO.h });
-      zones.push([t - hz, t + hz, 'door']);
-      placed++;
+    w.cols.push([0, C]);
+    for (let i = 1; i <= m; i++) {
+      const c = C / 2 + (i * (w.L - C)) / (m + 1);
+      w.cols.push([c - C / 2, c + C / 2]);
     }
-    if (placed < nd) warnings.push(`Only ${placed} of ${nd} door${nd === 1 ? '' : 's'} fit on the ${w.key} wall.`);
+    w.cols.push([w.L - C, w.L]);
+    for (let i = 0; i + 1 < w.cols.length; i++) w.bays.push([w.cols[i][1], w.cols[i + 1][0]]);
+    const zones = [];
+    const nd = doorCount[w.key];
+    const fit = w.bays.filter(([a, c]) => c - a >= doorRO.w + 3);
+    const n = Math.min(nd, fit.length);
+    if (n < nd) warnings.push(`Only ${n} of ${nd} door${nd === 1 ? '' : 's'} fit on the ${w.key} wall (one per bay between columns).`);
+    const used = new Set();
+    for (let k = 0; k < n; k++) {
+      let idx = Math.min(fit.length - 1, Math.max(0, Math.round(((k + 0.5) * fit.length) / n - 0.5)));
+      while (used.has(idx)) idx = (idx + 1) % fit.length;
+      used.add(idx);
+      const [a, c] = fit[idx];
+      const t = (a + c) / 2;
+      w.openings.push({ type: 'door', u0: t - doorRO.w / 2, u1: t + doorRO.w / 2, v0: 0, v1: doorRO.h });
+      zones.push([t - doorRO.w / 2 - 1.5, t + doorRO.w / 2 + 1.5, 'door']);
+    }
     const slots = Math.max(1, Math.ceil(w.L / S));
-    const wz = winRO.w / 2 + 3;
+    const half = winRO.w / 2 + 1.5;
     for (let k = 0; k < slots; k++) {
       const t = (w.L * (k + 0.5)) / slots;
-      if (zones.some(([za, zc, ty]) => ty === 'door' && overlaps(t - wz, t + wz, za - 6, zc + 6))) continue;
-      // 1) slide the window to the nearest gap between posts
+      if (zones.some(([a, c, ty]) => ty === 'door' && overlaps(t - half, t + half, a - 6, c + 6))) continue;
       let best = null;
-      const obst = [...zones.map(([a, c]) => [a - 3, c + 3]), ...posts.map((pc) => [pc - 2.75, pc + 2.75])];
-      for (const [a, c] of subtract(lo, hi, obst)) {
-        if (c - a < 2 * wz) continue;
-        const cc = Math.min(c - wz, Math.max(a + wz, t));
-        if (best === null || Math.abs(cc - t) < Math.abs(best - t)) best = cc;
+      for (const [a0, c0] of w.bays) {
+        for (const [a, c] of subtract(a0, c0, zones.map(([za, zc]) => [za - 6, zc + 6]))) {
+          if (c - a < 2 * half) continue;
+          const cc = Math.min(c - half, Math.max(a + half, t));
+          if (best === null || Math.abs(cc - t) < Math.abs(best - t)) best = cc;
+        }
       }
-      if (best !== null && Math.abs(best - t) > Math.min(S / 2, 24)) best = null;
-      // 2) otherwise move a post out of the way
-      if (best === null) {
-        const tc = Math.min(hi - wz, Math.max(lo + wz, t));
-        if (!zones.some(([za, zc]) => overlaps(tc - wz - 3, tc + wz + 3, za, zc)) && clearFor(tc - wz, tc + wz)) best = tc;
-      }
-      if (best === null) continue;
+      if (best === null || Math.abs(best - t) > S / 2) continue;
       w.openings.push({ type: 'window', u0: best - winRO.w / 2, u1: best + winRO.w / 2, v0: sill, v1: sill + winRO.h });
-      zones.push([best - wz, best + wz, 'window']);
-    }
-    w.midPostU = posts.slice();
-  }
-
-  // ---------------------------------------------------------------- posts
-  const posts = [];
-  const addPost = (x0, x1, z0, z1, wall, corner) => posts.push({ x0, x1, z0, z1, xc: (x0 + x1) / 2, zc: (z0 + z1) / 2, wall, corner });
-  addPost(0, 5.5, 0, 3, 'back', true);
-  addPost(W - 5.5, W, 0, 3, 'back', true);
-  addPost(0, 5.5, D - 3, D, 'front', true);
-  addPost(W - 5.5, W, D - 3, D, 'front', true);
-  for (const u of walls.back.midPostU) addPost(W - u - 2.75, W - u + 2.75, 0, 3, 'back', false);
-  for (const u of walls.front.midPostU) addPost(u - 2.75, u + 2.75, D - 3, D, 'front', false);
-  for (const u of walls.left.midPostU) addPost(0, 3, u - 2.75, u + 2.75, 'left', false);
-  for (const u of walls.right.midPostU) addPost(W - 3, W, D - u - 2.75, D - u + 2.75, 'right', false);
-  for (const po of posts) {
-    if (po.wall === 'back') walls.back.posts.push([W - po.x1, W - po.x0]);
-    else if (po.wall === 'front') walls.front.posts.push([po.x0, po.x1]);
-    else if (po.wall === 'left') walls.left.posts.push([po.z0, po.z1]);
-    else walls.right.posts.push([D - po.z1, D - po.z0]);
-  }
-  const longSpan = (W - 5.5) / (m + 1);
-  if (longSpan > 168) warnings.push(`Posts on the long walls are ${ftin(longSpan)} apart — consider more posts per wall.`);
-
-  // ---------------------------------------------------------------- layout
-  const tempStrings = { mat: 'string', group: 'temp', step: STEP.LAYOUT, stepTo: STEP.DIG, name: 'Layout string line', temp: true, ex: [0, 0, 0] };
-  const sy = 10;
-  const st = 0.15;
-  b.box(-0.05, 0.05, sy, sy + st, -30, D + 30, tempStrings);
-  b.box(W - 0.05, W + 0.05, sy, sy + st, -30, D + 30, tempStrings);
-  b.box(-30, W + 30, sy, sy + st, -0.05, 0.05, tempStrings);
-  b.box(-30, W + 30, sy, sy + st, D - 0.05, D + 0.05, tempStrings);
-  b.member(V(0, sy + 0.5, 0), V(W, sy + 0.5, D), { t: st, d: st }, UP, { ...tempStrings, name: 'Diagonal check string', mat: 'stringDiag' });
-  b.member(V(W, sy + 0.5, 0), V(0, sy + 0.5, D), { t: st, d: st }, UP, { ...tempStrings, name: 'Diagonal check string', mat: 'stringDiag' });
-  const stake = { ...tempStrings, mat: 'wood', name: 'Batter board' };
-  for (const [cx, cz, dx, dz] of [[0, 0, -1, -1], [W, 0, 1, -1], [0, D, -1, 1], [W, D, 1, 1]]) {
-    b.box(cx + dx * 18 - 12, cx + dx * 18 + 12, sy - 3.5, sy, cz + dz * 30 - 0.75, cz + dz * 30 + 0.75, stake);
-    b.box(cx + dx * 30 - 0.75, cx + dx * 30 + 0.75, sy - 3.5, sy, cz + dz * 18 - 12, cz + dz * 18 + 12, stake);
-    for (const [ox, oz] of [[dx * 30, dz * 30], [dx * 30, dz * 6], [dx * 6, dz * 30]]) {
-      b.box(cx + ox - 0.75, cx + ox + 0.75, -6, sy + 2, cz + oz - 0.75, cz + oz + 0.75, { ...stake, name: 'Stake' });
+      zones.push([best - half, best + half, 'window']);
     }
   }
 
-  // ---------------------------------------------------------------- excavation
-  const digDepth = Math.max(0, -yS0);
-  b.box(0, W, 0.02, 0.12, 0, D, { mat: 'hole', name: `Excavation, ${ftin(digDepth)} deep`, group: 'footing', step: STEP.DIG, stepTo: STEP.DIG, ex: [0, 0, 0] });
-  const r = P.holeDia / 2;
-  for (const po of posts) {
-    b.cyl(po.xc, po.zc, r, 0.12, 0.3, { mat: 'hole', name: 'Post hole', group: 'footing', step: STEP.DIG, stepTo: STEP.DIG, ex: [0, 0, 0] });
-  }
-
-  // ---------------------------------------------------------------- posts
-  const bottom = y0 - P.embed;
-  let maxPost = 0;
-  let shallow = 0;
-  for (const po of posts) {
-    const top = yTop - 3;
-    const pb = top - bottom > 192 && top - bottom <= 200 ? top - 192 : bottom;
-    if (pb !== bottom) shallow = Math.max(shallow, y0 - pb);
-    const L = top - pb;
-    maxPost = Math.max(maxPost, L);
-    const alongX = po.x1 - po.x0 > po.z1 - po.z0;
-    const plies = alongX ? [[po.z0, po.z0 + 1.5], [po.z0 + 1.5, po.z1]] : [[po.x0, po.x0 + 1.5], [po.x0 + 1.5, po.x1]];
-    plies.forEach(([a, c], k) => {
-      const split = k === 0 ? 192 : 144;
-      const cuts = L > 192 + 1e-6 ? [[pb, pb + split], [pb + split, top]] : [[pb, top]];
-      for (const [ya, yb] of cuts) {
-        const [x0, x1, z0, z1] = alongX ? [po.x0, po.x1, a, c] : [a, c, po.z0, po.z1];
-        b.lumberBox('2x6', x0, x1, ya, yb, z0, z1, { name: po.corner ? 'Corner post ply' : 'Wall post ply', cat: 'structure', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0] });
-      }
-    });
-    b.box(po.x0 - 0.12, po.x1 + 0.12, pb, y0 + 6, po.z0 - 0.12, po.z1 + 0.12, { mat: 'wrap', name: 'Bitumen wrap on the embedded part of the post', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0] });
-    if (pb - 4 < yS0) {
-      b.cyl(po.xc, po.zc, r, pb - 4, yS0 + 0.01, { mat: 'concrete', name: `Post footing ⌀${inch(P.holeDia)} (poured with the slab)`, group: 'footing', step: STEP.SLAB, ex: [0, -1.8 * EX, 0] });
-    }
-  }
-  if (shallow) warnings.push(`Posts are set ${ftin(shallow)} below the slab top (instead of ${ftin(P.embed)}) so they can be cut from one 16' board.`);
-  if (maxPost > 192 + 1e-6) warnings.push(`Posts are ${ftin(maxPost)} — longer than 16 ft stock, so post plies are spliced (staggered).`);
-
-  // temporary bracing on corner posts until the walls are up
-  for (const po of posts.filter((x) => x.corner)) {
-    const dx = po.xc < W / 2 ? -1 : 1;
-    const dz = po.zc < D / 2 ? -1 : 1;
-    const o = { mat: 'wood', name: 'Temporary brace (reuse offcuts)', group: 'temp', step: STEP.POSTS, stepTo: STEP.WALL_FRONT, temp: true, ex: [0, 0, 0] };
-    b.member(V(po.xc + dx * 48, 0, po.zc), V(po.xc + dx * 3.5, 66, po.zc), { t: 1.5, d: 3.5 }, V(0, 0, 1), o);
-    b.member(V(po.xc, 0, po.zc + dz * 48), V(po.xc, 66, po.zc + dz * 2.5), { t: 1.5, d: 3.5 }, V(1, 0, 0), o);
-  }
-
-  // ---------------------------------------------------------------- formwork, plastic, rebar
-  const formRows = Math.max(1, Math.ceil((y0 + 0.5) / 5.5));
-  const fo = { cat: 'formwork', group: 'formwork', step: STEP.POSTS, stepTo: STEP.SLAB, name: 'Slab form board (2x6, reuse later)', ex: [0, 0, 0] };
-  for (let k = 0; k < formRows; k++) {
-    const ya = y0 - 5.5 * (k + 1);
-    const yb = y0 - 5.5 * k;
-    for (const [s, e] of splitRange(-1.5, W + 1.5, [], 192)) {
-      b.lumberBox('2x6', s, e, ya, yb, -1.5, 0, fo);
-      b.lumberBox('2x6', s, e, ya, yb, D, D + 1.5, fo);
-    }
-    for (const [s, e] of splitRange(0, D, [], 192)) {
-      b.lumberBox('2x6', -1.5, 0, ya, yb, s, e, fo);
-      b.lumberBox('2x6', W, W + 1.5, ya, yb, s, e, fo);
-    }
-  }
-  const stakeO = { ...fo, name: 'Form stake (2x4)' };
-  for (let x = 24; x < W; x += 48) {
-    b.lumberBox('2x4', x - 0.75, x + 0.75, -14, y0, -3, -1.5, stakeO);
-    b.lumberBox('2x4', x - 0.75, x + 0.75, -14, y0, D + 1.5, D + 3, stakeO);
-  }
-  for (let z = 24; z < D; z += 48) {
-    b.lumberBox('2x4', -3, -1.5, -14, y0, z - 0.75, z + 0.75, stakeO);
-    b.lumberBox('2x4', W + 1.5, W + 3, -14, y0, z - 0.75, z + 0.75, stakeO);
-  }
-  b.box(0.5, W - 0.5, y0 - slabCore - 0.12, y0 - slabCore - 0.02, 0.5, D - 0.5, { mat: 'plastic', name: '6-mil plastic under the slab', group: 'formwork', step: STEP.POSTS, stepTo: STEP.POSTS, ex: [0, 0, 0] });
-  const rebar = [];
-  const rebarY = edge ? y0 - 2 : y0 - P.slabT / 2;
-  const ro = { mat: 'rebar', group: 'formwork', step: STEP.POSTS, stepTo: STEP.POSTS, name: '1/2" rebar', ex: [0, 0, 0] };
-  const barPieces = (L) => {
-    const n = Math.max(1, Math.ceil((L - 12) / (240 - 12)));
-    const len = (L + 12 * (n - 1)) / n;
-    for (let i = 0; i < n; i++) rebar.push(len);
-  };
-  const sp = P.rebarSpacing;
-  for (let z = 3; z <= D - 3 + 0.01; z += sp) {
-    b.box(3, W - 3, rebarY, rebarY + 0.5, z - 0.25, z + 0.25, { ...ro, info: `${ftin(W - 6)} run` });
-    barPieces(W - 6);
-  }
-  for (let x = 3; x <= W - 3 + 0.01; x += sp) {
-    b.box(x - 0.25, x + 0.25, rebarY + 0.5, rebarY + 1, 3, D - 3, { ...ro, info: `${ftin(D - 6)} run` });
-    barPieces(D - 6);
-  }
-  if (edge) {
-    for (const yy of [yS0 + 3, y0 - 6]) {
-      b.box(6, W - 6, yy, yy + 0.5, 6, 6.5, ro); b.box(6, W - 6, yy, yy + 0.5, D - 6.5, D - 6, ro);
-      b.box(6, 6.5, yy, yy + 0.5, 6, D - 6, ro); b.box(W - 6.5, W - 6, yy, yy + 0.5, 6, D - 6, ro);
-      barPieces(W - 12); barPieces(W - 12); barPieces(D - 12); barPieces(D - 12);
-    }
-  }
-
-  // ---------------------------------------------------------------- slab
-  const slabName = edge ? 'Concrete slab (4") with thickened edge' : `Concrete slab, ${inch(P.slabT)} thick`;
-  const so = { mat: 'concrete', name: slabName, info: `${ftin(W)} × ${ftin(D)}, top ${inch(P.slabAbove)} above grade`, group: 'slab', step: STEP.SLAB, ex: [0, -1.5 * EX, 0] };
-  b.box(0, W, y0 - slabCore, y0, 0, D, so);
-  if (edge) {
-    const eo = { ...so, name: `Thickened slab edge, 12" wide × ${inch(P.slabT)} deep` };
-    b.box(0, W, yS0, y0 - 4, 0, 12, eo);
-    b.box(0, W, yS0, y0 - 4, D - 12, D, eo);
-    b.box(0, 12, yS0, y0 - 4, 12, D - 12, eo);
-    b.box(W - 12, W, yS0, y0 - 4, 12, D - 12, eo);
-  }
-
-  // ---------------------------------------------------------------- walls
-  // Framing ------------------------------------------------------------
-  const blockLevels = [];
-  const nLev = Math.max(1, Math.round(H / 32) - 1);
-  for (let j = 1; j <= nLev; j++) blockLevels.push((H * j) / (nLev + 1));
-  let studCount = 0;
-  let anchors = 0;
+  // ---------------------------------------------------------------- existing concrete
+  const ex0 = [0, 0, 0];
+  const conc = { mat: 'concrete', group: 'existing', step: STEP.SITE, ex: ex0 };
+  const footBot = -12;
+  // perimeter outline (continuous below the floor) and pony walls (gapped at doors)
   for (const w of Object.values(walls)) {
-    const fo2 = { cat: 'framing', group: 'wall', step: w.step, ex: wallEx(w, 0.6, 1.5) };
+    const long = w.key === 'front' || w.key === 'back';
+    const ua = long ? 0 : Pt;
+    const ub = long ? w.L : w.L - Pt;
+    let [x0, x1, yy0, yy1, z0, z1] = wallBox(w, ua, ub, footBot - y0, 0, 0, Pt);
+    b.box(x0, x1, yy0, yy1, z0, z1, { ...conc, name: `Existing concrete outline, ${inch(Pt)} thick` });
+    const gaps = w.openings.filter((o) => o.type === 'door').map((o) => [o.u0, o.u1]);
+    for (const [s, e] of subtract(ua, ub, gaps)) {
+      [x0, x1, yy0, yy1, z0, z1] = wallBox(w, s, e, 0, PH, 0, Pt);
+      b.box(x0, x1, yy0, yy1, z0, z1, { ...conc, name: `Existing pony wall, ${ftin(PH)} high` });
+    }
+  }
+  // columns and ring beam
+  const colWorld = [];
+  for (const w of Object.values(walls)) {
+    w.cols.forEach(([a, c], i) => {
+      if (i === 0 && (w.key === 'left' || w.key === 'right')) return; // corners belong to the long walls
+      if (i === w.cols.length - 1 && (w.key === 'left' || w.key === 'right')) return;
+      const [x0, x1, , , z0, z1] = wallBox(w, a, c, 0, 1, 0, C);
+      colWorld.push([x0, x1, z0, z1]);
+      b.box(x0, x1, y0 + PH, y0 + Rb, z0, z1, { ...conc, name: `Existing concrete column ${inch(C)} × ${inch(C)}` });
+    });
+  }
+  for (const w of Object.values(walls)) {
+    const long = w.key === 'front' || w.key === 'back';
+    const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, long ? 0 : C, long ? w.L : w.L - C, Rb, ringTop, 0, C);
+    b.box(x0, x1, yy0, yy1, z0, z1, { ...conc, name: `Existing ring beam, ${inch(P.ringH)} high` });
+  }
+
+  // ---------------------------------------------------------------- floor slab
+  const slab = P.floorSlab === 'yes';
+  const T = P.floorSlabT;
+  const rebar = [];
+  let concreteFt3 = 0;
+  if (slab) {
+    const ro = { mat: 'rebar', group: 'floor', step: STEP.FLOOR_PREP, stepTo: STEP.FLOOR_PREP, name: '1/2" rebar', ex: ex0 };
+    const barPieces = (L) => {
+      const n = Math.max(1, Math.ceil((L - 12) / (240 - 12)));
+      for (let i = 0; i < n; i++) rebar.push((L + 12 * (n - 1)) / n);
+    };
+    const ry = y0 - T / 2;
+    const sp = P.rebarSpacing;
+    for (let z = Pt + 3; z <= D - Pt - 3 + 0.01; z += sp) {
+      b.box(Pt + 3, W - Pt - 3, ry - 0.5, ry, z - 0.25, z + 0.25, ro);
+      barPieces(W - 2 * Pt - 6);
+    }
+    for (let x = Pt + 3; x <= W - Pt - 3 + 0.01; x += sp) {
+      b.box(x - 0.25, x + 0.25, ry, ry + 0.5, Pt + 3, D - Pt - 3, ro);
+      barPieces(D - 2 * Pt - 6);
+    }
+    b.box(Pt, W - Pt, y0 - T - 0.1, y0 - T, Pt, D - Pt, { mat: 'plastic', name: '6-mil plastic under the floor', group: 'floor', step: STEP.FLOOR_PREP, stepTo: STEP.FLOOR_PREP, ex: ex0 });
+    b.box(Pt, W - Pt, y0 - T, y0, Pt, D - Pt, { mat: 'concrete', name: `New floor slab, ${inch(T)} thick`, group: 'floor', step: STEP.FLOOR, ex: [0, -0.8 * EX, 0] });
+    concreteFt3 = ((W - 2 * Pt) * (D - 2 * Pt) * T) / 1728;
+  }
+  const cementNet = concreteFt3 / BAG_YIELD_FT3;
+  const plasticFt2 = slab ? ((W - 2 * Pt + 12) * (D - 2 * Pt + 12)) / 144 : 0;
+
+  // ---------------------------------------------------------------- wall plates on the ring beam
+  let wedge = 0;
+  let screws = 0;
+  for (const w of Object.values(walls)) {
+    const long = w.key === 'front' || w.key === 'back';
+    for (const [s, e] of splitRange(long ? 0 : pw, long ? w.L : w.L - pw, [], 192)) {
+      const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, s, e, ringTop, ringTop + 1.5, 0, pw);
+      b.lumberBox('2x6', x0, x1, yy0, yy1, z0, z1, { cat: 'framing', name: 'Wall plate on ring beam (2x6)', group: 'plates', step: STEP.PLATES, ex: [0, 2.5 * EX, 0] });
+      wedge += Math.ceil((e - s) / 32) + 1;
+    }
+  }
+
+  // ---------------------------------------------------------------- infill framing
+  const blockLevels = [];
+  const bayH = Rb - PH;
+  const nLev = Math.max(1, Math.round(bayH / 30) - 1);
+  for (let j = 1; j <= nLev; j++) blockLevels.push(PH + (bayH * j) / (nLev + 1));
+  for (const w of Object.values(walls)) {
+    const fo = { cat: 'framing', group: 'wall', step: w.step, ex: wallEx(w, 0.6, 1.5) };
     const add = (name, size, u0, u1, v0, v1, d0, d1, extra = {}) => {
       const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, u0, u1, v0, v1, d0, d1);
-      return b.lumberBox(size, x0, x1, yy0, yy1, z0, z1, { ...fo2, name, ...extra });
+      return b.lumberBox(size, x0, x1, yy0, yy1, z0, z1, { ...fo, name, ...extra });
     };
-    const doorHoles = w.openings.filter((o) => o.type === 'door').map((o) => [o.u0, o.u1]);
-    for (const [s0, e0] of subtract(w.ua, w.ub, [...w.posts, ...doorHoles])) {
-      for (const [s, e] of splitRange(s0, e0, [], 192)) {
-        add('Bottom plate (anchored to slab)', '2x4', s, e, 0, 1.5, 0, 3.5);
-        anchors += Math.max(2, Math.ceil((e - s) / 48) + 1);
+    for (const [a, c] of w.bays) {
+      const ops = w.openings.filter((o) => o.u0 >= a - 0.01 && o.u1 <= c + 0.01);
+      const doors = ops.filter((o) => o.type === 'door');
+      for (const [s, e] of subtract(a, c, doors.map((o) => [o.u0, o.u1]))) {
+        add('Bottom plate on pony wall', '2x4', s, e, PH, PH + 1.5, 0, 3.5);
+        screws += Math.ceil((e - s) / 24) + 1;
+      }
+      add('Top plate under ring beam', '2x4', a, c, Rb - 1.5, Rb, 0, 3.5);
+      screws += Math.ceil((c - a) / 24) + 1;
+      const vtop = Rb - 1.5;
+      const vbot = PH + 1.5;
+      const vertical = [];
+      const zonesB = ops.map((o) => [o.u0 - 1.5, o.u1 + 1.5]);
+      for (const [u0, u1] of [[a, a + 1.5], [c - 1.5, c]]) {
+        if (zonesB.some(([za, zc]) => overlaps(u0, u1, za, zc))) continue;
+        add('Stud (fixed to column)', '2x4', u0, u1, vbot, vtop, 0, 3.5);
+        vertical.push([u0, u1]);
+        screws += Math.ceil(bayH / 24);
+      }
+      for (let g = 0; g <= w.L; g += P.studSpacing) {
+        const u0 = g - 0.75;
+        const u1 = g + 0.75;
+        if (u0 < a + 4 || u1 > c - 4) continue;
+        if (zonesB.some(([za, zc]) => overlaps(u0 - 1, u1 + 1, za, zc))) continue;
+        add('Stud', '2x4', u0, u1, vbot, vtop, 0, 3.5);
+        vertical.push([u0, u1]);
+      }
+      for (const o of ops) {
+        const { u0, u1, v0, v1 } = o;
+        const kingBot = o.type === 'door' ? PH + 1.5 : vbot;
+        add('King stud', '2x4', u0 - 1.5, u0, kingBot, vtop, 0, 3.5);
+        add('King stud', '2x4', u1, u1 + 1.5, kingBot, vtop, 0, 3.5);
+        if (u0 - 1.5 <= a + 0.01) screws += Math.ceil(bayH / 24);
+        if (u1 + 1.5 >= c - 0.01) screws += Math.ceil(bayH / 24);
+        vertical.push([u0 - 1.5, u0], [u1, u1 + 1.5]);
+        const grid = [];
+        for (let g = 0; g <= w.L; g += P.studSpacing) if (g > u0 + 2 && g < u1 - 2) grid.push(g);
+        if (!grid.length) grid.push((u0 + u1) / 2);
+        if (v1 + 1.5 <= vtop - 0.01) {
+          add('Head (flat 2x4)', '2x4', u0, u1, v1, v1 + 1.5, 0, 3.5);
+          if (vtop - (v1 + 1.5) > 2) for (const g of grid) add('Cripple stud', '2x4', g - 0.75, g + 0.75, v1 + 1.5, vtop, 0, 3.5);
+        }
+        if (o.type === 'window') {
+          add('Rough sill', '2x4', u0, u1, v0 - 1.5, v0, 0, 3.5);
+          if (v0 - 1.5 - vbot > 2) for (const g of grid) add('Cripple stud', '2x4', g - 0.75, g + 0.75, vbot, v0 - 1.5, 0, 3.5);
+        }
+      }
+      vertical.sort((x, y) => x[0] - y[0]);
+      for (const lv of blockLevels) {
+        for (let i = 0; i + 1 < vertical.length; i++) {
+          const s = vertical[i][1];
+          const e = vertical[i + 1][0];
+          if (e - s < 3) continue;
+          const gc = (s + e) / 2;
+          if (ops.some((o) => gc > o.u0 - 1.5 && gc < o.u1 + 1.5 && lv > o.v0 - 3 && lv < o.v1 + 3)) continue;
+          add('Blocking / girt', '2x4', s, e, lv - 0.75, lv + 0.75, 0, 3.5);
+        }
       }
     }
-    for (const layer of [0, 1]) {
-      const vt = H - 1.5 * layer;
-      for (const [s, e] of splitRange(w.ua, w.ub, [], 192, layer === 1)) add(layer ? 'Top plate (lower)' : 'Top plate (upper)', '2x4', s, e, vt - 1.5, vt, 0, 3.5);
-    }
-    const vertical = [...w.posts.map(([a, c]) => [a, c])];
-    const zones = w.openings.map((o) => [o.u0 - 3, o.u1 + 3]);
-    const cands = new Set([w.ua + 0.75, w.ub - 0.75]);
-    for (let c = 0; c <= w.L; c += P.studSpacing) if (c > w.ua + 3 && c < w.ub - 3) cands.add(c);
-    for (const c of [...cands].sort((x, y) => x - y)) {
-      const u0 = c - 0.75;
-      const u1 = c + 0.75;
-      if (w.posts.some(([a, c2]) => overlaps(u0 - 1, u1 + 1, a, c2))) continue;
-      if (zones.some(([a, c2]) => overlaps(u0, u1, a, c2))) continue;
-      add('Stud', '2x4', u0, u1, 1.5, H - 3, 0, 3.5);
-      vertical.push([u0, u1]);
-      studCount++;
-    }
-    for (const o of w.openings) {
-      const { u0, u1, v0, v1 } = o;
-      add('King stud', '2x4', u0 - 3, u0 - 1.5, 1.5, H - 3, 0, 3.5);
-      add('King stud', '2x4', u1 + 1.5, u1 + 3, 1.5, H - 3, 0, 3.5);
-      vertical.push([u0 - 3, u0 - 1.5], [u1 + 1.5, u1 + 3]);
-      add('Trimmer stud', '2x4', u0 - 1.5, u0, 1.5, v1, 0, 3.5);
-      add('Trimmer stud', '2x4', u1, u1 + 1.5, 1.5, v1, 0, 3.5);
-      add('Header ply', '2x6', u0 - 1.5, u1 + 1.5, v1, v1 + 5.5, 0, 1.5);
-      add('Header ply', '2x6', u0 - 1.5, u1 + 1.5, v1, v1 + 5.5, 2, 3.5);
-      const grid = [];
-      for (let c = 0; c <= w.L; c += P.studSpacing) if (c > u0 + 1 && c < u1 - 1) grid.push(c);
-      if (!grid.length) grid.push((u0 + u1) / 2);
-      for (const c of grid) {
-        const tv = H - 3;
-        if (tv - (v1 + 5.5) > 2) add('Cripple stud', '2x4', c - 0.75, c + 0.75, v1 + 5.5, tv, 0, 3.5);
-        if (o.type === 'window' && v0 - 1.5 - 1.5 > 2) add('Cripple stud', '2x4', c - 0.75, c + 0.75, 1.5, v0 - 1.5, 0, 3.5);
-      }
-      if (o.type === 'window') add('Rough sill', '2x4', u0, u1, v0 - 1.5, v0, 0, 3.5);
-    }
-    vertical.sort((x, y) => x[0] - y[0]);
-    for (const lv of blockLevels) {
-      for (let i = 0; i + 1 < vertical.length; i++) {
-        const s = vertical[i][1];
-        const e = vertical[i + 1][0];
-        if (e - s < 3) continue;
-        const gc = (s + e) / 2;
-        if (w.openings.some((o) => gc > o.u0 - 1.5 && gc < o.u1 + 1.5)) continue;
-        add('Blocking / girt', '2x4', s, e, lv - 0.75, lv + 0.75, 0, 3.5);
-      }
-    }
+    // gable-end studs above the ring beam
     if (w.key === 'left' || w.key === 'right') {
-      for (let c = P.studSpacing; c < w.L; c += P.studSpacing) {
-        if (c < 6 || c > w.L - 6) continue;
-        const z = w.key === 'left' ? c : D - c;
-        const hgt = underside(z) - y0 - H;
+      for (let g = P.studSpacing; g < w.L; g += P.studSpacing) {
+        const z = w.key === 'left' ? g : D - g;
+        const hgt = underside(z) - yTop;
         if (hgt < 3) continue;
-        const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, c - 0.75, c + 0.75, H, H + hgt, 0, 3.5);
+        const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, g - 0.75, g + 0.75, ringTop + 1.5, ringTop + 1.5 + hgt, 0, 3.5);
         b.lumberBox('2x4', x0, x1, yy0, yy1, z0, z1, { cat: 'framing', name: 'Gable stud', group: 'roof', step: STEP.ROOF_FRAME, ex: wallEx(w, 0.6, 3.5) });
       }
     }
   }
-  let ties = posts.length; // post-to-plate straps
 
   // ---------------------------------------------------------------- roof framing
   const rafterXs = [0.75];
@@ -559,16 +467,14 @@ export function design(P) {
   const rafterOpt = { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: roofEx, name: `Rafter (${rafterSize})` };
   const nBack = V(0, cos, -sin);
   const nFront = V(0, cos, sin);
-  // Rafters: plumb cut at the tail (for the fascia) and at the ridge, with a
-  // birdsmouth notch where they sit on the wall plate.
   const zr = D / 2 - 0.75;
   const rafterLen = (zr + E) / cos;
-  const profile = [[-E, underside(-E)], [0, underside(0)], [0, yTop], [zr, underside(zr)], [zr, rafterTop(zr)], [-E, rafterTop(-E)]];
+  const profile = [[-E, underside(-E)], [0, underside(0)], [0, yTop], [pw, yTop], [zr, underside(zr)], [zr, rafterTop(zr)], [-E, rafterTop(-E)]];
   for (const x of rafterXs) {
     b.prism(profile, x - 0.75, x + 0.75, rafterSize, rafterLen, rafterOpt);
     b.prism(profile.map(([z, y]) => [D - z, y]).reverse(), x - 0.75, x + 0.75, rafterSize, rafterLen, rafterOpt);
   }
-  const ridgeTop = rafterTop(D / 2 - 0.75);
+  const ridgeTop = rafterTop(zr);
   for (const [s, e] of splitRange(0, W, rafterXs, 192)) {
     b.lumberBox('2x6', s, e, ridgeTop - 5.5, ridgeTop, D / 2 - 0.75, D / 2 + 0.75, { ...rafterOpt, name: 'Ridge board' });
   }
@@ -578,7 +484,7 @@ export function design(P) {
       b.lumberBox('2x4', x + 0.75, x + 2.25, yTop, yTop + 3.5, s, e, { ...rafterOpt, name: 'Ceiling tie' });
     }
   });
-  ties += rafterXs.length * 2;
+  const ties = rafterXs.length * 2;
 
   const slopes = [
     { key: 'back', zt: -E, dir: 1, top: (D / 2 + E) / cos, nrm: nBack },
@@ -602,10 +508,9 @@ export function design(P) {
         b.member(a, c, '2x4', upDir, { cat: 'framing', group: 'purlins', step: STEP.PURLINS, ex: [0, 5 * EX, 0], name: 'Purlin (2x4 flat)' });
       }
     }
-    const zf = sl.zt;
-    const yf = rafterTop(zf);
+    const yf = rafterTop(sl.zt);
     for (const [xa, xb] of splitRange(-R, W + R, rafterXs, 192)) {
-      const za = sl.dir > 0 ? zf - 0.75 : zf;
+      const za = sl.dir > 0 ? sl.zt - 0.75 : sl.zt;
       b.lumberBox('1x6', xa, xb, yf - 5.5, yf, za, za + 0.75, { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: [0, 3.5 * EX, -sl.dir * 0.4 * EX], name: 'Fascia' });
     }
   }
@@ -654,45 +559,39 @@ export function design(P) {
 
   // ---------------------------------------------------------------- siding
   let sidingFasteners = 0;
-  const vb = -1.5; // laps 1-1/2" over the slab edge
-  for (const w of Object.values(walls)) {
-    const nc = Math.ceil((w.L - (tinW - P.tinCover)) / P.tinCover);
+  const hang = (w, ua, ub, vbase, topFn, holes0, label) => {
+    const L = ub - ua;
+    const nc = Math.max(1, Math.ceil((L - (tinW - P.tinCover)) / P.tinCover));
     for (let i = 0; i < nc; i++) {
-      const ui = i * P.tinCover;
-      const wi = Math.min(tinW, w.L - ui);
+      const ui = ua + i * P.tinCover;
+      const wi = Math.min(tinW, ub - ui);
       if (wi < 3) continue;
       let top = -Infinity;
-      for (let t = 0; t <= 8; t++) top = Math.max(top, w.sideTop(ui + (wi * t) / 8));
-      const Lc = top - vb;
+      for (let t = 0; t <= 8; t++) top = Math.max(top, topFn(ui + (wi * t) / 8));
+      const Lc = top - vbase;
+      if (Lc < 2) continue;
       sheetRun(Lc).forEach((pc, j) => {
-        const base = vb + pc.start;
-        const holes = w.openings.map((o) => ({ x0: o.u0 - ui, x1: o.u1 - ui, y0: o.v0 - base, y1: o.v1 - base }));
-        const profile = (x) => w.sideTop(ui + x) - base;
+        const base = vbase + pc.start;
+        const holes = holes0.map((o) => ({ x0: o.u0 - ui, x1: o.u1 - ui, y0: o.v0 - base, y1: o.v1 - base }));
+        const profile = (x) => topFn(ui + x) - base;
         const o = toW(w, ui, base, -(0.15 + (i % 2) * 0.08 + j * 0.12));
         b.sheet(o, w.U, UP, w.n, { w: wi, h: pc.len, corr: CORR, holes, profile }, {
-          mat: tinMat, name: tinName + ' (siding)', info: `cut length ${ftin(pc.len)}`, group: 'siding', step: STEP.SIDING, ex: wallEx(w, 2.2, 1.5),
+          mat: tinMat, name: `${tinName} (${label})`, info: `cut length ${ftin(pc.len)}`, group: 'siding', step: STEP.SIDING, ex: wallEx(w, 2.2, 1.5),
         });
         tinPieces.push({ stock: pc.stock, len: pc.len, use: 'siding' });
         sidingFasteners += (blockLevels.length + 2) * 5 * (pc.len / Lc);
       });
     }
+  };
+  for (const w of Object.values(walls)) {
+    for (const [a, c] of w.bays) hang(w, a, c, PH - 1.5, () => Rb, w.openings.filter((o) => o.u0 >= a - 0.01 && o.u1 <= c + 0.01), 'wall panel');
+    if (w.sideTop) hang(w, 0, w.L, ringTop - 1, w.sideTop, [], 'gable');
   }
-  const cb = { cat: 'framing', group: 'trim', step: STEP.SIDING, name: 'Corner trim (1x4)' };
-  const cbBot = y0 + vb;
-  const cbTop = yTop;
-  const t0 = 0.85;
-  b.lumberBox('1x4', 0, 3.5, cbBot, cbTop, D + t0, D + t0 + 0.75, { ...cb, ex: [0, 1.5 * EX, 2.5 * EX] });
-  b.lumberBox('1x4', W - 3.5, W, cbBot, cbTop, D + t0, D + t0 + 0.75, { ...cb, ex: [0, 1.5 * EX, 2.5 * EX] });
-  b.lumberBox('1x4', 0, 3.5, cbBot, cbTop, -t0 - 0.75, -t0, { ...cb, ex: [0, 1.5 * EX, -2.5 * EX] });
-  b.lumberBox('1x4', W - 3.5, W, cbBot, cbTop, -t0 - 0.75, -t0, { ...cb, ex: [0, 1.5 * EX, -2.5 * EX] });
-  b.lumberBox('1x4', -t0 - 0.75, -t0, cbBot, cbTop, D - 3.5, D, { ...cb, ex: [-2.5 * EX, 1.5 * EX, 0] });
-  b.lumberBox('1x4', -t0 - 0.75, -t0, cbBot, cbTop, 0, 3.5, { ...cb, ex: [-2.5 * EX, 1.5 * EX, 0] });
-  b.lumberBox('1x4', W + t0, W + t0 + 0.75, cbBot, cbTop, D - 3.5, D, { ...cb, ex: [2.5 * EX, 1.5 * EX, 0] });
-  b.lumberBox('1x4', W + t0, W + t0 + 0.75, cbBot, cbTop, 0, 3.5, { ...cb, ex: [2.5 * EX, 1.5 * EX, 0] });
 
   // ---------------------------------------------------------------- windows & doors
   const winList = [];
   let nDoors = 0;
+  const t0 = 0.85;
   const trimD = [-(t0 + 0.75), -t0];
   for (const w of Object.values(walls)) {
     for (const o of w.openings) {
@@ -702,14 +601,15 @@ export function design(P) {
       const exOut = wallEx(w, 3.2, 1.5);
       const trimO = { cat: 'framing', group: 'trim', step, ex: wallEx(w, 2.8, 1.5), name: isDoor ? 'Door casing (1x4)' : 'Window casing (1x4)' };
       const addT = (a, c, va, vc) => {
+        if (vc - va < 1) return;
         const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, a, c, va, vc, trimD[0], trimD[1]);
         b.lumberBox('1x4', x0, x1, yy0, yy1, z0, z1, trimO);
       };
-      addT(u0 - 3.5, u1 + 3.5, v1, v1 + 3.5);
-      addT(u0 - 3.5, u0, isDoor ? 0 : v0, v1);
-      addT(u1, u1 + 3.5, isDoor ? 0 : v0, v1);
-      if (!isDoor) addT(u0 - 3.5, u1 + 3.5, v0 - 3.5, v0);
       if (!isDoor) {
+        addT(u0 - 3.5, u1 + 3.5, v1, Math.min(v1 + 3.5, Rb));
+        addT(u0 - 3.5, u0, v0, v1);
+        addT(u1, u1 + 3.5, v0, v1);
+        addT(u0 - 3.5, u1 + 3.5, v0 - 3.5, v0);
         const fh = P.windowH * 12;
         const al = { mat: 'alu', group: 'windows', step, ex: exOut, name: `Louvre frame ${P.windowH}'` };
         for (const [a, c] of [[u0 + 0.25, u0 + 1.25], [u1 - 1.25, u1 - 0.25]]) {
@@ -728,9 +628,11 @@ export function design(P) {
         winList.push({ frame: P.windowH, blades: nBl, bladeLen: P.windowW, wall: w.key });
       } else {
         nDoors++;
+        addT(u0 - 3.5, u0, PH - 1.5, v1);
+        addT(u1, u1 + 3.5, PH - 1.5, v1);
         const jo = { cat: 'framing', group: 'door', step, ex: exOut, name: 'Door jamb (1x6)' };
         const addJ = (a, c, va, vc) => {
-          const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, a, c, va, vc, -0.75, 3.75);
+          const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, a, c, va, vc, -0.75, Pt - 0.5);
           b.lumberBox('1x6', x0, x1, yy0, yy1, z0, z1, jo);
         };
         addJ(u0, u0 + 0.75, 0, v1);
@@ -739,7 +641,7 @@ export function design(P) {
         const lu0 = u0 + 1;
         const lu1 = u1 - 1;
         const lv0 = 0.5;
-        const lv1 = lv0 + P.doorH;
+        const lv1 = lv0 + leafH;
         const lo = { cat: 'framing', group: 'door', step, ex: exOut, name: 'Door board (1x6)' };
         for (let u = lu0; u < lu1 - 0.5; u += 5.5) {
           const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, u + 0.03, Math.min(u + 5.5, lu1) - 0.03, lv0, lv1, 0.25, 1.0);
@@ -764,41 +666,28 @@ export function design(P) {
   // ---------------------------------------------------------------- interior plywood
   const wallPlyPieces = [];
   for (const w of Object.values(walls)) {
-    const ua = 3.5;
-    const ub = w.L - 3.5;
-    for (let u = ua; u < ub - 0.5; u += 48) {
-      const cw = Math.min(48, ub - u);
-      for (let v = 0; v < H - 0.5; v += 96) {
-        const rh = Math.min(96, H - v);
-        const holes = w.openings.map((o) => ({ x0: o.u0 - u, x1: o.u1 - u, y0: o.v0 - v, y1: o.v1 - v }));
-        const o = toW(w, u, v, 3.62);
-        b.sheet(o, w.U, UP, w.n, { w: cw - 0.06, h: rh, corr: null, holes }, {
-          mat: 'plyWall', name: PLY[P.wallPly].name + ' wall sheet', info: `${ftin(cw)} × ${ftin(rh)}`, group: 'interior', step: STEP.INTERIOR, ex: wallEx(w, -0.6, 1.5),
-        });
-        wallPlyPieces.push({ w: cw, h: rh });
+    for (const [a, c] of w.bays) {
+      const holes0 = w.openings.filter((o) => o.u0 >= a - 0.01 && o.u1 <= c + 0.01);
+      for (let u = a; u < c - 0.5; u += 48) {
+        const cw = Math.min(48, c - u);
+        for (let v = PH; v < Rb - 0.5; v += 96) {
+          const rh = Math.min(96, Rb - v);
+          const holes = holes0.map((o) => ({ x0: o.u0 - u, x1: o.u1 - u, y0: o.v0 - v, y1: o.v1 - v }));
+          const o = toW(w, u, v, 3.62);
+          b.sheet(o, w.U, UP, w.n, { w: cw - 0.06, h: rh, corr: null, holes }, {
+            mat: 'plyWall', name: PLY[P.wallPly].name + ' wall sheet', info: `${ftin(cw)} × ${ftin(rh)}`, group: 'interior', step: STEP.INTERIOR, ex: wallEx(w, -0.6, 1.5),
+          });
+          wallPlyPieces.push({ w: cw, h: rh });
+        }
       }
     }
   }
 
   // ---------------------------------------------------------------- quantities
-  const postArea = 3 * 5.5;
-  let holeVol = 0;
-  for (let i = 0; i < posts.length; i++) {
-    const depth = yS0 - (bottom - 4);
-    if (depth > 0) holeVol += Math.PI * r * r * depth - postArea * Math.max(0, yS0 - bottom);
-  }
-  const slabVol = edge ? W * D * 4 + (2 * (W + D) * 12 - 4 * 144) * (P.slabT - 4) : W * D * P.slabT;
-  const postInSlab = posts.length * postArea * (edge ? P.slabT : P.slabT);
-  const concreteFt3 = (slabVol + holeVol - postInSlab) / 1728;
-  const cementNet = concreteFt3 / BAG_YIELD_FT3;
-  const plasticFt2 = ((W + 12) * (D + 12)) / 144;
-
   let n16 = 0;
   for (const l of b.lumber) {
-    if (l.cat === 'formwork') n16 += 4;
-    else if (l.cat === 'structure') n16 += Math.ceil(l.len / 12);
-    else if (['1x4', '1x6', '1x8', '1x2', '1x3'].includes(l.size)) continue;
-    else n16 += 4 + Math.floor(l.len / 24);
+    if (['1x4', '1x6', '1x8', '1x2', '1x3'].includes(l.size)) continue;
+    n16 += 4 + Math.floor(l.len / 24);
   }
   n16 += purlinRows * rafterXs.length * 2;
   let n8 = 0;
@@ -807,31 +696,31 @@ export function design(P) {
   const roofFast = Math.ceil(roofFasteners + sidingFasteners);
 
   // ---------------------------------------------------------------- steps
-  const nPosts = posts.length;
   const diag = Math.hypot(W, D);
-  const floorArea = (W * D) / 144;
+  const floorArea = ((W - 2 * Pt) * (D - 2 * Pt)) / 144;
   const roofPlanFt2 = ((W + 2 * R) * (D + 2 * E)) / 144;
   const nWin = winList.length;
   const rainGal = roofPlanFt2 * 0.623;
-  const bagsR = Math.ceil(cementNet);
+  const nColumns = colWorld.length;
+  const bayList = walls.front.bays.map(([a, c]) => ftin(c - a)).join(', ');
+  const endBays = walls.left.bays.map(([a, c]) => ftin(c - a)).join(', ');
   const doorDesc = [P.doorsFront && `${P.doorsFront} in the front wall`, P.doorsBack && `${P.doorsBack} in the back wall`, P.doorsSide && `${P.doorsSide} in each end wall`].filter(Boolean).join(', ');
+  const count = (k, t) => walls[k].openings.filter((o) => o.type === t).length;
   const steps = [
-    { title: 'Bare site', text: `Choose the highest, best-drained ground available and clear it. The foundation is ${ftin(W)} × ${ftin(D)} (${num(floorArea)} sq ft). Turn the long walls toward the prevailing trade winds so the louvres cross-ventilate.` },
-    { title: 'Lay out & square the foundation', text: `Set batter boards about 2' outside each corner and stretch string lines on the outside edges of the slab at ${ftin(W)} and ${ftin(D)}. Square the layout by measuring the diagonals — both must be ${ftin(diag)}. Mark the ${nPosts} post centres: one at each corner and ${m} between the corners on every wall.` },
-    { title: 'Excavate', text: `Dig the slab area out ${ftin(digDepth)} below grade so the ${edge ? 'thickened edge' : `${inch(P.slabT)} slab`} finishes ${inch(P.slabAbove)} above the ground${edge ? ` (trench the 12"-wide edge beam ${ftin(P.slabT)} deep around the perimeter)` : ''}. Then dig ${nPosts} post holes, ${inch(P.holeDia)} across, down to ${ftin(P.embed + 4)} below the finished slab. Compact the bottom.` },
-    { title: 'Set posts, forms & rebar', text: `Each post is two 2x6s nailed together every 12", staggered. Wrap the part that goes into concrete in bitumen or heavy plastic. Stand the posts on 4" of concrete in their holes, plumb them both ways and brace them. Nail 2x6 form boards around the perimeter on stakes, with the top edge exactly level at slab height. Lay 6-mil plastic, then a ${inch(sp)} grid of 1/2" rebar on chairs at mid-depth, tied at the crossings and to the posts.` },
-    { title: 'Pour the slab', text: `Pour the post holes and slab in one go — about ${num(concreteFt3)} ft³ (${num(concreteFt3 / 27, 1)} yd³) of 1 : 2 : 3 concrete, roughly ${bagsR} bags of cement. That is a big hand-mixing job: line up a crew, mixers or boards, and plenty of fresh water. Screed the top flat, slope it slightly toward the doors, and set 1/2" J-bolts for the wall plates (${anchors}) while the concrete is wet. Keep it damp under wet sacks for 7 days.` },
-    { title: 'Frame the back wall', text: `Lay a strip of plastic or bitumen under the 2x4 bottom plate and bolt the plate to the slab. Frame between the posts with studs at ${inch(P.studSpacing)} on centre, ${blockLevels.length} rows of flat blocking for the siding, and a double top plate running over the posts. ${walls.back.openings.length ? `Openings: ${walls.back.openings.filter((o) => o.type === 'door').length} door, ${walls.back.openings.filter((o) => o.type === 'window').length} windows.` : ''}` },
-    { title: 'Frame the front wall', text: `Frame the front wall the same way, with ${walls.front.openings.filter((o) => o.type === 'door').length} door openings (${ftin(doorRO.w)} × ${ftin(doorRO.h)} rough opening, doubled 2x6 headers) and ${walls.front.openings.filter((o) => o.type === 'window').length} windows. The bottom plate is cut out at each door.` },
-    { title: 'Frame the end walls', text: `Frame both end walls. Each has ${walls.left.openings.filter((o) => o.type === 'door').length} door and ${walls.left.openings.filter((o) => o.type === 'window').length} louvre windows (${ftin(winRO.w)} × ${ftin(winRO.h)} rough opening, sill at ${ftin(sill)}). Windows are never more than ${ftin(S)} apart along a wall. Lap the top plates at the corners and strap every post to the plate.` },
-    { title: 'Roof framing', text: `Gable roof at ${P.pitch}:12. Raise the 2x6 ridge board on temporary props, then set ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre with ${inch(E)} eave overhangs. Tie every rafter to the plate with a hurricane tie. Add 2x4 ceiling ties on alternate pairs to stop the walls spreading, and fill the gable ends with studs. Nail 1x6 fascia to the rafter tails.` },
+    { title: 'Existing concrete frame', text: `Already built: a ${ftin(W)} × ${ftin(D)} concrete outline, ${inch(Pt)} thick. On it are pony walls ${ftin(PH)} high and ${nColumns} columns (${inch(C)} × ${inch(C)}: the corners plus ${m} along each wall), with a ${inch(P.ringH)} ring beam whose underside is ${ftin(Rb)} above the floor. Before ordering, check: both diagonals ${ftin(diag)}; the clear bays between columns (long walls ${bayList}; end walls ${endBays}); and the ring-beam height. Adjust the inputs to match what was actually poured.` },
+    slab ? { title: 'Prepare the floor', text: `Fill inside the outline with compacted sand or coral to ${ftin(T)} below the finished floor. Lay 6-mil plastic, then a ${inch(P.rebarSpacing)} grid of 1/2" rebar on chairs.` } : { title: 'Floor (not included)', text: 'No floor slab is included in this design. Turn it on under "Floor slab" to add it to the plan and the bill of materials.' },
+    slab ? { title: 'Pour the floor slab', text: `Pour a ${inch(T)} floor slab inside the outline — ${num(concreteFt3)} ft³, about ${Math.ceil(cementNet)} bags of cement. The pony walls act as the form. Leave the door thresholds flush and slope the floor slightly toward the doors. Keep it damp for a week.` } : { title: 'Floor (not included)', text: 'Skipped.' },
+    { title: 'Wall plates', text: `Bolt a 2x6 wall plate flat on top of the ring beam with 1/2" wedge anchors about every 32" (${wedge} anchors) — the rafters sit on this. In every bay, fasten a 2x4 bottom plate to the pony wall and a 2x4 top plate to the underside of the ring beam, using concrete screws (drill with a hammer drill). Put a strip of plastic or bitumen under any wood that touches concrete.` },
+    { title: 'Infill the long walls', text: `Frame each bay between the columns. Studs at ${inch(P.studSpacing)} on centre are screwed to the columns at each end, with ${blockLevels.length} row${blockLevels.length > 1 ? 's' : ''} of flat blocking for the siding. Front wall: ${count('front', 'door')} doors, ${count('front', 'window')} windows. Back wall: ${count('back', 'door')} door${count('back', 'door') === 1 ? '' : 's'}, ${count('back', 'window')} windows. The ring beam carries the roof, so openings need only a flat 2x4 head, not a header.` },
+    { title: 'Infill the end walls', text: `Frame the end-wall bays the same way: ${count('left', 'door')} door and ${count('left', 'window')} windows in each. The louvre rough opening is ${ftin(winRO.w)} × ${ftin(winRO.h)}, with the sill at ${ftin(sill)}. Windows are never more than ${ftin(S)} apart.` },
+    { title: 'Roof framing', text: `Gable roof at ${P.pitch}:12. Set the 2x6 ridge on temporary props, then fit ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre. Each rafter is birdsmouthed onto the wall plate, plumb-cut at the tail for the fascia, and tied down with a hurricane tie. Add 2x4 ceiling ties on alternate pairs, and frame the gable ends above the ring beam with studs.` },
     { title: 'Purlins', text: `Nail 2x4 purlins flat across the rafters, ${slopes.map((s) => s.purlins).join(' + ')} rows at no more than ${inch(P.purlinSpacing)} apart, overhanging the gable ends by ${inch(R)}.` },
-    { title: 'Roofing', text: `Lay ${tinPieces.filter((t) => t.use === 'roof').length} pieces of ${clad === 'pvc' ? 'PVC' : 'galvanised metal'} sheet, starting at the end away from the prevailing wind. Lap one corrugation at the sides and ${inch(LAP)} at any end joints. Fasten through the crests with sealing-washer roofing fasteners${clad === 'pvc' ? ', pre-drilling oversized holes so the PVC can expand' : ''}. Finish with the ridge cap. Each inch of rain on the ${num(roofPlanFt2)} sq ft roof is about ${num(rainGal)} gallons — worth catching with gutters and a tank.` },
-    { title: 'Siding', text: `Hang ${tinPieces.filter((t) => t.use === 'siding').length} ${clad === 'pvc' ? 'PVC' : 'metal'} siding pieces vertically, nailed to the bottom plate, blocking rows and top plate. Let them lap 1-1/2" down over the slab edge so rain drips clear. Cut the openings after the sheets are up and cover the corners with 1x4 trim.` },
-    { title: 'Louvre windows', text: `Screw the ${P.windowH}' aluminium louvre frames into the ${nWin} window openings and slide in the ${winList.reduce((s, x) => s + x.blades, 0)} ${P.windowW}' glass blades. Trim the outside with 1x4 casing.` },
-    { title: 'Doors', text: `Hang ${nDoors} doors (${doorDesc}). Each has 1x6 jambs and is built from vertical 1x6 boards with a 1x4 Z-brace — the diagonal runs up from the bottom hinge side. Use three galvanised T-hinges and a hasp per door, then trim the outside with 1x4 casing.` },
-    { title: 'Interior walls', text: `Nail ${wallPlyPieces.length} pieces of ${PLY[P.wallPly].name} to the inside of the wall framing with 1-1/4" galvanised panel nails. The roof space stays open above the walls for ventilation.` },
-    { title: 'Complete', text: `Finished: a ${ftin(W)} × ${ftin(D)} house on a concrete slab, with a gable ${clad === 'pvc' ? 'PVC' : 'metal'} roof, ${nPosts} posts, ${nWin} louvre windows and ${nDoors} doors. Recommended extras: insect screen behind the louvres, gutters and a water tank, and paint or oil on exposed wood.` },
+    { title: 'Roofing', text: `Lay ${tinPieces.filter((t) => t.use === 'roof').length} pieces of ${clad === 'pvc' ? 'PVC' : 'galvanised metal'} sheet, starting at the end away from the prevailing wind. Lap one corrugation at the sides and ${inch(LAP)} at any end joints, and fasten through the crests. Finish with the ridge cap. Each inch of rain on the ${num(roofPlanFt2)} sq ft roof yields about ${num(rainGal)} gallons.` },
+    { title: 'Siding', text: `Clad each bay with vertical ${clad === 'pvc' ? 'PVC' : 'metal'} sheets from just below the pony-wall top up to the ring beam, lapping 1-1/2" over the concrete so water runs off. Clad the gable triangles above the ring beam too (${tinPieces.filter((t) => t.use === 'siding').length} pieces in total). Seal the joints where tin meets concrete.` },
+    { title: 'Louvre windows', text: `Fit ${nWin} ${P.windowH}' aluminium louvre frames and ${winList.reduce((s, x) => s + x.blades, 0)} ${P.windowW}' glass blades, then trim with 1x4 casing.` },
+    { title: 'Doors', text: `Hang ${nDoors} doors (${doorDesc}), each ${inch(P.doorW)} × ${ftin(leafH)}. Each sits in a gap in the pony wall. The 1x6 jambs are screwed to the concrete below and to the king studs above. Doors are vertical 1x6 boards with a 1x4 Z-brace, on three galvanised T-hinges, with a hasp.` },
+    { title: 'Interior walls', text: `Line the inside of the infill panels with ${wallPlyPieces.length} pieces of ${PLY[P.wallPly].name}. The concrete columns, pony walls and ring beam stay exposed (paint them if you like). The roof space stays open for ventilation.` },
+    { title: 'Complete', text: `Finished: a ${ftin(W)} × ${ftin(D)} house on the existing concrete frame, with a gable ${clad === 'pvc' ? 'PVC' : 'metal'} roof, ${nWin} louvre windows and ${nDoors} doors. Recommended extras: insect screen behind the louvres, gutters and a water tank.` },
   ];
 
   const dims = [
@@ -841,29 +730,14 @@ export function design(P) {
 
   return {
     P, W, D, parts: b.parts, steps, dims, warnings,
-    bounds: { min: [-R - 40, bottom - 4, -E - 40], max: [W + R + 40, roofTop(D / 2) + 12, D + E + 40] },
+    bounds: { min: [-R - 40, footBot, -E - 40], max: [W + R + 40, roofTop(D / 2) + 12, D + E + 40] },
     q: {
-      lumber: b.lumber,
-      wallPly: { type: P.wallPly, pieces: wallPlyPieces },
-      tin: tinPieces,
-      ridgePieces,
-      windows: winList,
-      concreteFt3,
-      cementNet,
-      rebar,
-      plasticFt2,
-      anchors,
-      ties,
-      n16,
-      n8,
-      nPanel,
-      roofFast,
-      posts: posts.length,
-      doors: nDoors,
+      lumber: b.lumber, wallPly: { type: P.wallPly, pieces: wallPlyPieces }, tin: tinPieces, ridgePieces, windows: winList,
+      concreteFt3, cementNet, rebar, plasticFt2, wedge, screws, ties, n16, n8, nPanel, roofFast, doors: nDoors,
     },
     info: {
-      posts: nPosts, midPosts: m, rafterSize, diag, floorArea, roofPlanFt2, rainGal, maxPost, longSpan,
-      studCount, sill, nWin, nDoors, concreteFt3, ridgeHeight: roofTop(D / 2), digDepth,
+      columns: nColumns, midPosts: m, rafterSize, diag, floorArea, roofPlanFt2, rainGal, sill, nWin, nDoors, concreteFt3,
+      ridgeHeight: roofTop(D / 2), leafH, bayList, endBays,
     },
   };
 }

@@ -120,11 +120,10 @@ export function computeBOM(d, P, prices) {
     (groups[k] ||= []).push(l);
   }
   const catInfo = {
-    structure: { section: 'Posts', ov: P.ovPosts },
     formwork: { section: 'Slab formwork (reused for blocking afterwards)', ov: P.ovFraming },
     framing: { section: 'Framing lumber', ov: P.ovFraming },
   };
-  const order = ['structure', 'formwork', 'framing'];
+  const order = ['framing'];
   const sizes = Object.keys(LUMBER);
   for (const cat of order) {
     for (const size of sizes) {
@@ -164,13 +163,15 @@ export function computeBOM(d, P, prices) {
     add('Windows', `louvreGlass${bl}`, `${blades} blades + 10% spare for breakage`, blades, 10, { lb: bl * 0.75 });
   }
 
-  // ---- foundation
-  add('Foundation', 'cement', `Slab + ${q.posts} post footings (${q.concreteFt3.toFixed(0)} ft³ concrete)`, q.cementNet, P.ovCement, { lb: CEMENT_LB, unit: 'bags' });
-  const bars = cutBoards(q.rebar.map((len) => ({ len, label: 'Rebar' })), 240);
-  cuts.push({ cat: 'rebar', section: 'Foundation', size: '1/2" rebar', stock: 240, boards: bars });
-  add('Foundation', 'rebar', `Slab grid (${q.rebar.length} pieces, 12" laps)`, bars.length, P.ovCement, { lb: 13.4 });
-  add('Foundation', 'tieWire', 'Rebar crossings', Math.max(1, Math.ceil(q.rebar.length / 25)), 0, { lb: 3.5, unit: 'rolls' });
-  add('Foundation', 'plastic', `Under slab (${q.plasticFt2.toFixed(0)} ft² incl. laps)`, q.plasticFt2 / 220, 0, { lb: 15, unit: 'rolls' });
+  // ---- floor slab
+  if (q.concreteFt3 > 0) {
+    add('Floor slab', 'cement', `New floor slab (${q.concreteFt3.toFixed(0)} ft³ concrete)`, q.cementNet, P.ovCement, { lb: CEMENT_LB, unit: 'bags' });
+    const bars = cutBoards(q.rebar.map((len) => ({ len, label: 'Rebar' })), 240);
+    cuts.push({ cat: 'rebar', section: 'Floor slab', size: '1/2" rebar', stock: 240, boards: bars });
+    add('Floor slab', 'rebar', `Floor grid (${q.rebar.length} pieces, 12" laps)`, bars.length, P.ovCement, { lb: 13.4 });
+    add('Floor slab', 'tieWire', 'Rebar crossings', Math.max(1, Math.ceil(q.rebar.length / 25)), 0, { lb: 3.5, unit: 'rolls' });
+    add('Floor slab', 'plastic', `Under slab (${q.plasticFt2.toFixed(0)} ft² incl. laps)`, q.plasticFt2 / 220, 0, { lb: 15, unit: 'rolls' });
+  }
 
   // ---- fasteners & hardware
   const ovF = P.ovFasteners;
@@ -178,11 +179,11 @@ export function computeBOM(d, P, prices) {
   add('Fasteners & hardware', 'nail8', `Trim, doors, fascia (~${Math.round(q.n8)} nails)`, Math.max(1, q.n8 / 90), ovF, { lb: 1, unit: 'lb' });
   add('Fasteners & hardware', 'nailPanel', `Interior plywood (~${Math.round(q.nPanel)} nails)`, Math.max(1, q.nPanel / 300), ovF, { lb: 1, unit: 'lb' });
   add('Fasteners & hardware', 'roofFast', `Roof & siding (~${Math.round(q.roofFast)})`, q.roofFast / 100, ovF, { lb: 1.6, unit: 'boxes' });
-  add('Fasteners & hardware', 'anchor', 'Wall plates to slab', q.anchors, ovF, { lb: 0.6 });
-  add('Fasteners & hardware', 'tie', 'Rafters, post-to-plate straps', q.ties, ovF, { lb: 0.25 });
+  add('Fasteners & hardware', 'wedge', 'Wall plate to ring beam', q.wedge, ovF, { lb: 0.3 });
+  add('Fasteners & hardware', 'conScrew', `Infill framing to concrete (~${q.screws})`, q.screws / 100, ovF, { lb: 3, unit: 'boxes' });
+  add('Fasteners & hardware', 'tie', 'Rafters to wall plate', q.ties, ovF, { lb: 0.25 });
   add('Fasteners & hardware', 'hinge', `${q.doors} doors × 3`, q.doors * 3, 0, { lb: 0.8 });
   add('Fasteners & hardware', 'hasp', `${q.doors} doors`, q.doors, 0, { lb: 1 });
-  add('Fasteners & hardware', 'postWrap', 'Post bases', q.posts, 0, { lb: 0.5 });
 
   // ---- local (not purchased)
   const bags = lines.find((l) => l.key === 'cement')?.buy || 0;
@@ -192,7 +193,7 @@ export function computeBOM(d, P, prices) {
     { name: 'Fresh water for mixing & curing', qty: bags * 6, unit: 'gal' },
   ];
 
-  const ORDER = ['Foundation', 'Posts', 'Slab formwork (reused for blocking afterwards)', 'Framing lumber', 'Plywood', 'Roofing & siding', 'Windows', 'Fasteners & hardware'];
+  const ORDER = ['Floor slab', 'Framing lumber', 'Plywood', 'Roofing & siding', 'Windows', 'Fasteners & hardware'];
   const sections = [...new Set(lines.map((l) => l.section))].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
   const subtotal = lines.reduce((s, l) => s + l.total, 0);
   const weight = lines.reduce((s, l) => s + l.lb, 0);

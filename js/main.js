@@ -381,7 +381,7 @@ function renderBOM() {
   $('#totalChip').textContent = money(total);
   const floorArea = D.info.floorArea;
   let h = `<h2>Bill of materials</h2>
-  <p class="muted">Quantities are computed from the 3D model: lumber is cut-optimised from 16' boards, plywood is nested on 4'×8' sheets, and each group carries its own contingency (set in the sidebar). Prices come from the Weno supply shop sign; items marked <span class="badge">est.</span> are not on the sign and are estimates — edit any price and it is saved in this browser.</p>
+  <p class="muted">Quantities are computed from the 3D model: lumber is cut-optimised from 16' boards, plywood is nested on 4'×8' sheets, nails, screws, anchors and ties are counted from the hardware drawn in the model, and each group carries its own contingency (set in the sidebar). Prices come from the Weno supply shop sign; items marked <span class="badge">est.</span> are not on the sign and are estimates — edit any price and it is saved in this browser.</p>
   <div class="cards">
     <div class="card"><div class="k">Total</div><div class="v">${money(total)}</div><div class="s">${freight ? `incl. ${money(freight)} freight` : 'materials only'}</div></div>
     <div class="card"><div class="k">Per sq ft of floor</div><div class="v">${money(total / floorArea)}</div><div class="s">${num(floorArea)} sq ft</div></div>

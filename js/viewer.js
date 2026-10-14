@@ -6,7 +6,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { makeMaterials, groundTextureRepeat } from './materials.js';
-import { boxGeometry, sheetGeometry, cylGeometry, prismGeometry } from './geometry.js';
+import { boxGeometry, sheetGeometry, cylGeometry, prismGeometry, hardwareGeometry } from './geometry.js';
 import { ftin } from './format.js';
 
 function gradientTexture(top, bottom) {
@@ -249,7 +249,28 @@ export class Viewer {
     this.root.clear();
     this.meshes = [];
     const sketch = this.mode === 'sketch';
+    const m4 = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const one = new THREE.Vector3(1, 1, 1);
+    const v = new THREE.Vector3();
     for (const p of this.parts) {
+      if (p.kind === 'inst') {
+        // nails, screws and anchors: one instanced mesh per group
+        const n = p.items.length / 7;
+        const mesh = new THREE.InstancedMesh(hardwareGeometry(p.shape), this.M[p.mat] || this.M.steel, n);
+        for (let i = 0; i < n; i++) {
+          const a = p.items;
+          v.set(a[i * 7], a[i * 7 + 1], a[i * 7 + 2]);
+          q.set(a[i * 7 + 3], a[i * 7 + 4], a[i * 7 + 5], a[i * 7 + 6]);
+          mesh.setMatrixAt(i, m4.compose(v, q, one));
+        }
+        mesh.computeBoundingSphere();
+        mesh.userData.part = p;
+        mesh.userData.base = mesh.position.clone();
+        this.root.add(mesh);
+        this.meshes.push(mesh);
+        continue;
+      }
       let geo;
       if (p.kind === 'box') geo = boxGeometry(p.size, p.id);
       else if (p.kind === 'sheet') geo = sheetGeometry(p.geom);
@@ -405,6 +426,7 @@ export class Viewer {
     if (!hit) { this.tip.style.display = 'none'; return; }
     const p = hit.object.userData.part;
     let txt = `<b>${p.name || ''}</b>`;
+    if (p.kind === 'inst') txt += `<br>${p.items.length / 7} in this group`;
     if (p.lumber) txt += `<br>${p.lumber} × ${ftin(p.len)}`;
     if (p.info) txt += `<br>${p.info}`;
     this.tip.innerHTML = txt;

@@ -184,6 +184,7 @@ const SKETCH = {
   glass: 0x9fc6e6,
   alu: 0xd0d4d8,
   steel: 0x55595e,
+  brass: 0xb08d3c,
   wrap: 0x2b2b2b,
   hole: 0x4a3b2a,
   string: 0xff3b30,
@@ -223,6 +224,7 @@ export function makeMaterials(mode) {
     M.glass = new THREE.MeshPhysicalMaterial({ color: 0xcfe6ef, metalness: 0, roughness: 0.08, transmission: 0.0, transparent: true, opacity: 0.38, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.5 });
     M.alu = new THREE.MeshStandardMaterial({ color: 0xd8dadc, metalness: 1, roughness: 0.38 });
     M.steel = new THREE.MeshStandardMaterial({ color: 0x8a8f94, metalness: 1, roughness: 0.45 });
+    M.brass = new THREE.MeshStandardMaterial({ color: 0xc9a54a, metalness: 1, roughness: 0.35 });
     M.wrap = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.55 });
     M.hole = new THREE.MeshStandardMaterial({ color: 0x5c4a35, roughness: 1 });
     M.string = new THREE.MeshStandardMaterial({ color: 0xff4a3a, roughness: 0.8 });

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // Box with world-scaled UVs: u runs along the longest axis (wood grain).
 export function boxGeometry(size, seed = 0) {
@@ -97,5 +98,37 @@ export function prismGeometry(pts, depth) {
   const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 48, uv.getY(i) / 12);
+  return g;
+}
+
+// Small hardware in local coords: the head sits on the surface at the
+// origin facing +Y and the shank runs down -Y into the wood.
+const hcyl = (r0, r1, h, y, seg) => {
+  const g = new THREE.CylinderGeometry(r0, r1, h, seg, 1);
+  g.translate(0, y, 0);
+  return g;
+};
+const HARDWARE = {
+  // 16d common: 0.28" head, 3-1/2" long
+  nail16: () => [hcyl(0.14, 0.14, 0.05, 0.025, 10), hcyl(0.08, 0.08, 3.5, -1.75, 6)],
+  // 8d: 0.25" head, 2-1/2" long
+  nail8: () => [hcyl(0.125, 0.125, 0.045, 0.022, 10), hcyl(0.065, 0.065, 2.5, -1.25, 6)],
+  // short joist-hanger nail for hurricane ties
+  tieNail: () => [hcyl(0.125, 0.125, 0.045, 0.022, 10), hcyl(0.07, 0.07, 1.5, -0.75, 6)],
+  // 1-1/4" panel nail
+  panelNail: () => [hcyl(0.1, 0.1, 0.03, 0.015, 8), hcyl(0.05, 0.05, 1.25, -0.625, 5)],
+  // 1/4" hex-washer-head concrete screw, 3-1/4" long
+  conScrew: () => [hcyl(0.25, 0.25, 0.05, 0.025, 12), hcyl(0.17, 0.17, 0.16, 0.13, 6), hcyl(0.12, 0.1, 3.25, -1.625, 6)],
+  // hex-head roofing screw with a bonded sealing washer
+  roofScrew: () => [hcyl(0.36, 0.34, 0.1, 0.05, 12), hcyl(0.19, 0.19, 0.25, 0.225, 6), hcyl(0.09, 0.07, 2.5, -1.25, 6)],
+  // pan-head wood screw (hinges, hasps)
+  woodScrew: () => [hcyl(0.15, 0.17, 0.07, 0.035, 10), hcyl(0.07, 0.05, 1.25, -0.625, 5)],
+  // 1/2" wedge anchor: washer, nut and threaded stud
+  wedge: () => [hcyl(0.6, 0.6, 0.1, 0.05, 16), hcyl(0.43, 0.43, 0.45, 0.325, 6), hcyl(0.25, 0.25, 5, -1.5, 10)],
+};
+
+export function hardwareGeometry(shape) {
+  const g = mergeGeometries((HARDWARE[shape] || HARDWARE.nail16)());
+  g.computeBoundingSphere();
   return g;
 }

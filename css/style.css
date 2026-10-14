@@ -212,12 +212,18 @@ table.t input.price { width: 76px; text-align: right; padding: 3px 5px; border: 
   body { overflow: auto; }
   .app { flex-direction: column; }
   .side { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); max-height: none; }
-  .content { min-height: 80vh; }
+  .content { min-height: 80vh; order: -1; }
+  .tabs { flex-wrap: nowrap; overflow-x: auto; order: 3; width: 100%; flex: none; }
+  .tab { white-space: nowrap; padding: 7px 10px; }
+  .brand { flex: 1; }
   .ship-wrap { flex-direction: column; }
   .ship-wrap .viewport { min-height: 55vh; }
   .ship-table { border-left: 0; min-width: 0; }
   .viewport { min-height: 60vh; }
-  .step-card { top: auto; bottom: 12px; }
+  .step-card { top: auto; bottom: 8px; left: 8px; width: calc(100% - 16px); padding: 8px 10px; }
+  .step-card p { font-size: 12px; max-height: 18vh; }
+  .step-ticks { display: none; }
+  .playbar { padding-bottom: 10px; }
   .warnings { display: none; }
   .top { gap: 10px; padding: 10px 16px; }
   .doc { padding: 16px 16px 40px; }

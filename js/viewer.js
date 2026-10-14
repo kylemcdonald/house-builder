@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
-import { Sky } from 'three/addons/objects/Sky.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
@@ -21,6 +20,44 @@ function gradientTexture(top, bottom) {
   g.fillStyle = gr;
   g.fillRect(0, 0, 4, 256);
   const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+function skyTexture(sun) {
+  const W = 1024, H = 512;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+  const img = g.createImageData(W, H);
+  const sAz = Math.atan2(sun.x, sun.z);
+  const sEl = Math.asin(sun.y);
+  const zen = [92, 146, 208], hor = [200, 222, 236], gnd = [190, 172, 138];
+  for (let y = 0; y < H; y++) {
+    const el = (0.5 - y / H) * Math.PI;
+    for (let x = 0; x < W; x++) {
+      const az = (x / W) * 2 * Math.PI - Math.PI;
+      let col;
+      if (el >= 0) {
+        const t = Math.pow(Math.sin(el), 0.5);
+        col = hor.map((h, i) => h + (zen[i] - h) * t);
+      } else {
+        const t = Math.pow(-Math.sin(el), 0.35);
+        col = hor.map((h, i) => h + (gnd[i] - h) * Math.min(1, t * 1.4));
+      }
+      const cosd = Math.sin(el) * Math.sin(sEl) + Math.cos(el) * Math.cos(sEl) * Math.cos(az - sAz);
+      const glow = Math.pow(Math.max(cosd, 0), 30) * 70 + Math.pow(Math.max(cosd, 0), 600) * 255;
+      const i = (y * W + x) * 4;
+      img.data[i] = Math.min(255, col[0] + glow);
+      img.data[i + 1] = Math.min(255, col[1] + glow * 0.95);
+      img.data[i + 2] = Math.min(255, col[2] + glow * 0.8);
+      img.data[i + 3] = 255;
+    }
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.mapping = THREE.EquirectangularReflectionMapping;
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -102,7 +139,7 @@ export class Viewer {
     const r = this.renderer;
     const realistic = this.mode === 'real';
     r.toneMapping = realistic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
-    r.toneMappingExposure = realistic ? 0.9 : 1;
+    r.toneMappingExposure = realistic ? 1.0 : 1;
     r.shadowMap.enabled = realistic;
     this.M = makeMaterials(realistic ? 'real' : 'sketch');
 
@@ -126,32 +163,16 @@ export class Viewer {
       this.env.add(d);
       this.composer = null;
     } else {
-      const sky = new Sky();
-      sky.scale.setScalar(30000);
-      const u = sky.material.uniforms;
-      u.turbidity.value = 2.5;
-      u.rayleigh.value = 2.2;
-      u.mieCoefficient.value = 0.004;
-      u.mieDirectionalG.value = 0.8;
-      const sun = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(38), THREE.MathUtils.degToRad(140));
-      u.sunPosition.value.copy(sun);
-      // environment map from the sky
+      const sun = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(40), THREE.MathUtils.degToRad(140));
+      // equirectangular gradient sky, used for the background and reflections
+      const skyTex = skyTexture(sun);
       const pm = new THREE.PMREMGenerator(r);
-      const envScene = new THREE.Scene();
-      const sky2 = new Sky();
-      sky2.scale.setScalar(1000);
-      Object.entries(u).forEach(([k, v]) => (sky2.material.uniforms[k].value = v.value?.clone ? v.value.clone() : v.value));
-      envScene.add(sky2);
-      const gEnv = new THREE.Mesh(new THREE.CircleGeometry(900, 32), new THREE.MeshBasicMaterial({ color: 0xbfae8a }));
-      gEnv.rotation.x = -Math.PI / 2;
-      gEnv.position.y = -5;
-      envScene.add(gEnv);
-      this.envMap = pm.fromScene(envScene, 0.02).texture;
+      this.envMap = pm.fromEquirectangular(skyTex).texture;
       pm.dispose();
       this.scene.environment = this.envMap;
-      this.scene.background = null;
-      this.env.add(sky);
-      const sunL = new THREE.DirectionalLight(0xfff1dc, 3.2);
+      this.scene.environmentIntensity = 1.0;
+      this.scene.background = skyTex;
+      const sunL = new THREE.DirectionalLight(0xfff1dc, 3.6);
       sunL.position.copy(sun).multiplyScalar(1500);
       sunL.castShadow = true;
       sunL.shadow.mapSize.set(4096, 4096);
@@ -161,7 +182,7 @@ export class Viewer {
       this.sun = sunL;
       this.env.add(sunL);
       this.env.add(sunL.target);
-      this.env.add(new THREE.HemisphereLight(0xcfe6ff, 0xc9b48a, 0.5));
+      this.env.add(new THREE.HemisphereLight(0xffffff, 0xd8c39a, 0.6));
       this.updateShadowBounds();
       try {
         const w = this.container.clientWidth || 1;
@@ -347,7 +368,9 @@ export class Viewer {
     const { min, max } = this.bounds;
     const c = new THREE.Vector3((min[0] + max[0]) / 2, (Math.max(0, min[1]) + max[1]) / 2 * 0.8, (min[2] + max[2]) / 2);
     const size = Math.max(max[0] - min[0], max[1] - Math.max(0, min[1]), max[2] - min[2]);
-    const dist = size / Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * (this.fitDir ? 0.6 : 0.62);
+    const vf = THREE.MathUtils.degToRad(this.camera.fov);
+    const hf = 2 * Math.atan(Math.tan(vf / 2) * this.camera.aspect);
+    const dist = ((size * 0.5) / Math.tan(Math.min(vf, hf) / 2)) * (this.fitDir ? 1.2 : 1.24);
     const dir = new THREE.Vector3(...(this.fitDir || [0.62, 0.42, 1])).normalize();
     this.camera.position.copy(c).addScaledVector(dir, dist);
     this.controls.target.copy(c);

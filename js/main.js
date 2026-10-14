@@ -24,6 +24,7 @@ function writeHash() {
   history.replaceState(null, '', s ? '#' + s : location.pathname + location.search);
 }
 readHash();
+window.addEventListener('hashchange', () => { readHash(); schedule(); });
 
 const PRICE_KEY = 'polowat-house-prices-v1';
 let prices = structuredClone(DEFAULT_PRICES);
@@ -440,7 +441,7 @@ function renderNotes() {
     ['Floor height', `${ftin(P.floorHeight)} above grade`],
     ['Wall height', shed ? `${ftin(i.topBack)} back, ${ftin(i.topFront)} front` : ftin(P.wallHeight)],
     ['Ridge / high point', `${ftin(i.ridgeHeight)} above grade`],
-    ['Posts', `${i.posts} posts (${i.nx} per beam line × ${i.nRows} lines), 2-ply 2x6, set ${ftin(P.embed)} in concrete`],
+    ['Posts', `${i.posts} posts on ${i.nRows} beam lines (${i.nx} per line, ${i.nFront} on the door side), 2-ply 2x6, set ${ftin(P.embed)} in concrete`],
     ['Longest post', ftin(i.maxPost)],
     ['Beams', 'Doubled 2x6, bolted to posts'],
     ['Joists', `2x6 @ ${P.joistSpacing}" o.c.`],

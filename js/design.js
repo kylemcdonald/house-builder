@@ -231,17 +231,33 @@ export function design(P) {
   if (shed && shedRafterLen > 192 && !roofBeams) warnings.push('Shed rafters are longer than 16 ft and will need to be spliced.');
 
   // ---------------------------------------------------------------- grid
+  const nx = Math.max(2, Math.ceil(W / P.postSpacing) + 1);
+  const xs = Array.from({ length: nx }, (_, i) => 2.75 + (i * (W - 5.5)) / (nx - 1));
+  // The door is always centred in the front wall and framed between two
+  // posts; other front posts shift out of its way.
+  const doorRO = { w: P.doorW + 2, h: P.doorH + 1.5 };
+  const doorC = W / 2;
+  const dL = doorC - doorRO.w / 2 - 3;
+  const dR = doorC + doorRO.w / 2 + 3;
+  const fx0 = xs.filter((x, i) => i === 0 || i === nx - 1 || x + 2.75 < dL - 12 || x - 2.75 > dR + 12);
+  fx0.push(dL - 2.75, dR + 2.75);
+  fx0.sort((a, b) => a - b);
+  const fxs = [fx0[0]];
+  for (const x of fx0.slice(1)) {
+    const last = fxs[fxs.length - 1];
+    const n = Math.ceil((x - last) / (P.postSpacing * 1.15));
+    for (let k = 1; k < n; k++) fxs.push(last + ((x - last) * k) / n);
+    fxs.push(x);
+  }
+
   const rows = [];
   for (let k = 0; k < nRows; k++) {
     const perim = k === 0 || k === nRows - 1;
     const zc = k === 0 ? 1.5 : k === nRows - 1 ? D - 1.5 : (D * k) / (nRows - 1);
     let pz, beams;
     if (k === 0) { pz = [0, 3]; beams = [[3, 4.5], [4.5, 6]]; } else if (k === nRows - 1) { pz = [D - 3, D]; beams = [[D - 6, D - 4.5], [D - 4.5, D - 3]]; } else { pz = [zc - 1.5, zc + 1.5]; beams = [[zc - 3, zc - 1.5], [zc + 1.5, zc + 3]]; }
-    rows.push({ k, zc, perim, pz, beams });
+    rows.push({ k, zc, perim, pz, beams, xs: k === nRows - 1 ? fxs : xs });
   }
-  const nx = Math.max(2, Math.ceil(W / P.postSpacing) + 1);
-  const xs = Array.from({ length: nx }, (_, i) => 2.75 + (i * (W - 5.5)) / (nx - 1));
-
   // ---------------------------------------------------------------- layout
   const tempStrings = { mat: 'string', group: 'temp', step: STEP.LAYOUT, stepTo: STEP.HOLES, name: 'Layout string line', temp: true, ex: [0, 0, 0] };
   const sy = 10;
@@ -265,8 +281,8 @@ export function design(P) {
   // ---------------------------------------------------------------- posts
   const posts = [];
   for (const row of rows) {
-    xs.forEach((xc, i) => {
-      const end = i === 0 || i === nx - 1;
+    row.xs.forEach((xc, i) => {
+      const end = i === 0 || i === row.xs.length - 1;
       const tall = row.perim || end || roofBeams;
       let top;
       if (!tall) top = yBt;
@@ -279,12 +295,16 @@ export function design(P) {
   }
   const bottom = -P.embed;
   let maxPost = 0;
+  let shallow = 0;
   for (const po of posts) {
-    const L = po.top - bottom;
+    // A post just over 16' is set a little shallower instead of spliced.
+    const pb = po.top - bottom > 192 && po.top - bottom <= 200 ? po.top - 192 : bottom;
+    if (pb !== bottom) shallow = Math.max(shallow, -pb);
+    const L = po.top - pb;
     maxPost = Math.max(maxPost, L);
     // two laminated 2x6 plies, splices staggered
     [[po.z0, po.z0 + 1.5, 192], [po.z0 + 1.5, po.z1, 144]].forEach(([za, zb, split]) => {
-      const cuts = L > 192 ? [[bottom, bottom + split], [bottom + split, po.top]] : [[bottom, po.top]];
+      const cuts = L > 192 + 1e-6 ? [[pb, pb + split], [pb + split, po.top]] : [[pb, po.top]];
       for (const [ya, yb] of cuts) {
         b.lumberBox('2x6', po.x0, po.x1, ya, yb, za, zb, {
           name: po.tall ? 'Post ply (full height)' : 'Post ply (floor)', cat: 'structure', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0],
@@ -294,17 +314,18 @@ export function design(P) {
     // footing: hole, concrete with a crowned collar above grade, base wrap
     const r = P.holeDia / 2;
     b.cyl((po.x0 + po.x1) / 2, (po.z0 + po.z1) / 2, r, -0.2, 0.08, { mat: 'hole', name: 'Post hole', group: 'footing', step: STEP.HOLES, stepTo: STEP.HOLES, ex: [0, 0, 0] });
-    b.cyl((po.x0 + po.x1) / 2, (po.z0 + po.z1) / 2, r, bottom - 4, 2, { mat: 'concrete', name: `Concrete footing ⌀${inch(P.holeDia)}`, group: 'footing', step: STEP.POSTS, ex: [0, -1.2 * EX, 0] });
+    b.cyl((po.x0 + po.x1) / 2, (po.z0 + po.z1) / 2, r, pb - 4, 2, { mat: 'concrete', name: `Concrete footing ⌀${inch(P.holeDia)}`, group: 'footing', step: STEP.POSTS, ex: [0, -1.2 * EX, 0] });
     b.box(po.x0 - 0.12, po.x1 + 0.12, -10, 6, po.z0 - 0.12, po.z1 + 0.12, { mat: 'wrap', name: 'Bitumen post-base wrap', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0] });
   }
-  if (maxPost > 192) warnings.push(`Tallest post is ${ftin(maxPost)} — longer than 16 ft stock, so post plies are spliced (staggered).`);
+  if (shallow) warnings.push(`The tallest posts are set ${ftin(shallow)} deep (instead of ${ftin(P.embed)}) so they can be cut from one 16' board.`);
+  if (maxPost > 192 + 1e-6) warnings.push(`Tallest post is ${ftin(maxPost)} — longer than 16 ft stock, so post plies are spliced (staggered).`);
 
   // temporary bracing on corner posts while concrete cures
   const corner = posts.filter((po) => po.row.perim && po.end);
   for (const po of corner) {
     const cx = (po.x0 + po.x1) / 2;
     const cz = (po.z0 + po.z1) / 2;
-    const dx = po.i === 0 ? -1 : 1;
+    const dx = po.xc < W / 2 ? -1 : 1;
     const dz = po.row.k === 0 ? -1 : 1;
     const o = { mat: 'wood', name: 'Temporary brace (reuse offcuts)', group: 'temp', step: STEP.POSTS, stepTo: STEP.JOISTS, temp: true, ex: [0, 0, 0] };
     b.member(V(cx + dx * 44, 0, cz), V(cx + dx * 4.5, 62, cz), { t: 1.5, d: 3.5 }, V(0, 0, 1), o);
@@ -312,28 +333,27 @@ export function design(P) {
   }
 
   // ---------------------------------------------------------------- beams
-  const postXs = xs;
   let bolts = 0;
   for (const row of rows) {
     const outward = row.k === 0 ? -1 : row.k === nRows - 1 ? 1 : 0;
     row.beams.forEach(([za, zb], ply) => {
-      const segs = splitRange(0, W, postXs, 192, ply === 1);
+      const segs = splitRange(0, W, row.xs, 192, ply === 1);
       for (const [s, e] of segs) {
         b.lumberBox('2x6', s, e, yBb, yBt, za, zb, { name: 'Floor beam ply', cat: 'structure', group: 'beams', step: STEP.BEAMS, ex: [0, 0.8 * EX, outward * 0.9 * EX] });
       }
     });
-    bolts += nx * 2;
+    bolts += row.xs.length * 2;
   }
   // Shed roof beams (only when the roof is deep enough to need them).
   if (roofBeams) {
     for (const row of rows.slice(1, -1)) {
       const yt = underside(row.zc);
       row.beams.forEach(([za, zb], ply) => {
-        for (const [s, e] of splitRange(0, W, postXs, 192, ply === 1)) {
+        for (const [s, e] of splitRange(0, W, row.xs, 192, ply === 1)) {
           b.lumberBox('2x6', s, e, yt - 5.5, yt, za, zb, { name: 'Roof beam ply', cat: 'structure', group: 'roof', step: STEP.ROOF_FRAME, ex: [0, 6 * EX, 0] });
         }
       });
-      bolts += nx * 2;
+      bolts += row.xs.length * 2;
     }
   }
 
@@ -358,8 +378,8 @@ export function design(P) {
       joistPieces++;
     }
   }
-  for (const [xa, xb, iEnd] of [[0, 1.5, 0], [W - 1.5, W, nx - 1]]) {
-    const holes = posts.filter((po) => po.i === iEnd && po.tall && !po.row.perim).map((po) => [po.z0, po.z1]);
+  for (const [xa, xb, left] of [[0, 1.5, true], [W - 1.5, W, false]]) {
+    const holes = posts.filter((po) => po.end && po.xc < W / 2 === left && po.tall && !po.row.perim).map((po) => [po.z0, po.z1]);
     for (const [s0, e0] of subtract(3, D - 3, holes)) {
       for (const [s, e] of splitRange(s0, e0, interiorZ, 192)) {
         b.lumberBox('2x6', xa, xb, yJb, yJt, s, e, { ...joistOpt, name: 'End joist' });
@@ -411,8 +431,8 @@ export function design(P) {
   for (const po of tallPosts) {
     if (po.row.k === 0) walls.back.posts.push([W - po.x1, W - po.x0]);
     else if (po.row.k === nRows - 1) walls.front.posts.push([po.x0, po.x1]);
-    if (!po.row.perim && po.i === 0) walls.left.posts.push([po.z0, po.z1]);
-    if (!po.row.perim && po.i === nx - 1) walls.right.posts.push([D - po.z1, D - po.z0]);
+    if (!po.row.perim && po.end && po.xc < W / 2) walls.left.posts.push([po.z0, po.z1]);
+    if (!po.row.perim && po.end && po.xc > W / 2) walls.right.posts.push([D - po.z1, D - po.z0]);
   }
 
   // Openings ---------------------------------------------------------
@@ -438,20 +458,6 @@ export function design(P) {
       if (xs[i + 1] - xs[i] - 5.5 < winRO.w + 6) continue;
       walls.back.openings.push({ type: 'window', u0: W - xc - winRO.w / 2, u1: W - xc + winRO.w / 2, v0: sill, v1: sill + winRO.h });
     }
-  }
-  // Door: centred if it clears the posts, otherwise centred in the nearest bay.
-  const doorRO = { w: P.doorW + 2, h: P.doorH + 1.5 };
-  let doorC = W / 2;
-  const clearOf = (c) => !walls.front.posts.some(([a, bb]) => overlaps(c - doorRO.w / 2 - 3, c + doorRO.w / 2 + 3, a, bb));
-  if (!clearOf(doorC)) {
-    let best = null;
-    for (let i = 0; i < nx - 1; i++) {
-      const c = (xs[i] + xs[i + 1]) / 2;
-      if (xs[i + 1] - xs[i] - 5.5 < doorRO.w + 6) continue;
-      if (!best || Math.abs(c - W / 2) < Math.abs(best - W / 2)) best = c;
-    }
-    if (best === null) { warnings.push('Post spacing too tight for the door.'); best = W / 2; }
-    doorC = best;
   }
   walls.front.openings.push({ type: 'door', u0: doorC - doorRO.w / 2, u1: doorC + doorRO.w / 2, v0: 0, v1: doorRO.h });
 
@@ -653,7 +659,7 @@ export function design(P) {
       if (wi < 4) continue;
       run.forEach((pc, j) => {
         const z = zs + sl.dir * pc.start * cos;
-        const o = V(xAxis.x > 0 ? xi : xi + wi, roofTop(z), z).addScaledVector(zAxis, 0.02 + (i % 2) * 0.08 + j * 0.12);
+        const o = V(xAxis.x > 0 ? xi : xi + wi, roofTop(z), z).addScaledVector(zAxis, 0.12 + (i % 2) * 0.08 + j * 0.12);
         b.sheet(o, xAxis, yAxis, zAxis, { w: wi, h: pc.len, corr: CORR }, {
           mat: tinMat, name: tinName, info: `cut length ${ftin(pc.len)}`, group: 'roofing', step: STEP.ROOFING,
           ex: [zAxis.x * EX, 9.5 * EX + zAxis.y * EX, zAxis.z * EX],
@@ -693,7 +699,7 @@ export function design(P) {
         const base = vb + pc.start;
         const holes = w.openings.map((o) => ({ x0: o.u0 - ui, x1: o.u1 - ui, y0: o.v0 - base, y1: o.v1 - base }));
         const profile = (x) => w.sideTop(ui + x) - base;
-        const o = toW(w, ui, base, -(0.02 + (i % 2) * 0.08 + j * 0.12));
+        const o = toW(w, ui, base, -(0.15 + (i % 2) * 0.08 + j * 0.12));
         b.sheet(o, w.U, UP, w.n, { w: wi, h: pc.len, corr: CORR, holes, profile }, {
           mat: tinMat, name: tinName + ' (siding)', info: `cut length ${ftin(pc.len)}`, group: 'siding', step: STEP.SIDING, ex: wallEx(w, 2.2, 3.8),
         });
@@ -894,7 +900,7 @@ export function design(P) {
   const rainGal = roofPlanFt2 * 0.623;
   const steps = [
     { title: 'Bare site', text: `Pick the highest, best-drained spot available and clear it of debris and roots. The building footprint is ${ftin(W)} × ${ftin(D)} (${num(floorArea)} sq ft of floor), plus about ${ftin(nT * g + 12)} in front for the stairs. Orient the long walls so the two louvre windows face the prevailing trade winds for cross-ventilation.` },
-    { title: 'Lay out & square the footprint', text: `Drive stakes and nail batter boards about 2' outside each corner, then stretch string lines along the outside faces of the building at ${ftin(W)} and ${ftin(D)}. Square the layout by measuring both diagonals — they must both be ${ftin(diag)}. Mark the ${nPosts} post centres (${nx} along each beam line, ${nRows} beam lines).` },
+    { title: 'Lay out & square the footprint', text: `Drive stakes and nail batter boards about 2' outside each corner, then stretch string lines along the outside faces of the building at ${ftin(W)} and ${ftin(D)}. Square the layout by measuring both diagonals — they must both be ${ftin(diag)}. Mark the ${nPosts} post centres (${nRows} beam lines; the front line has an extra pair of posts framing the door).` },
     { title: 'Dig post holes', text: `Dig ${nPosts} holes, ${inch(P.holeDia)} in diameter and ${ftin(P.embed + 4)} deep (the post sits on 4" of concrete). Keep the string lines up so each hole stays centred on its mark.` },
     { title: 'Set posts & pour footings', text: `Each post is two 2x6 plies nailed together (every 12", staggered) — the shop has no 4x4s, and laminated posts are straighter and stronger. Wrap the bottom 16" of every post in bitumen or heavy plastic. Pour 4" of concrete, set the post, plumb it in both directions with temporary braces, and fill the hole, crowning the concrete 2" above grade so water runs away from the wood. ${posts.filter((x) => x.tall).length} posts run full height to the wall plate; ${posts.filter((x) => !x.tall).length} stop under the floor. Mix about ${num(cementNet, 1)} bags of cement (1 : 2 : 3 cement : sand : gravel/crushed coral). Rinse beach sand with fresh water first. Keep the concrete damp and let it cure at least 3 days before loading.` },
     { title: 'Bolt the floor beams', text: `Snap a level line on every post at ${ftin(yBb)} above grade (bottom of beam). Each beam is two 2x6 plies bolted to the posts with two 1/2" galvanised bolts per post (${bolts} bolts in total). Beam lines: ${nRows}; splices only over a post.` },
@@ -902,7 +908,7 @@ export function design(P) {
     { title: 'Floor sheathing', text: `Glue (if available) and nail ${floorPieces.length} pieces of ${PLY[P.floorPly].name} with the long edge across the joists and the joints staggered. Use 8d galvanised nails every 6" at edges and 12" in the field. Notch around posts.` },
     { title: 'Stairs & railing', text: `Build the stairs now so the crew has safe access. ${nR} risers of ${inch(r)} and ${nT} treads, ${inch(g)} going, ${ftin(SW)} wide. Two 2x6 stringers sit on concrete-filled hollow blocks and bolt to the rim; each tread is two 2x6s on 2x4 cleats. Handrails on both sides at 34" above the nosing.` },
     { title: 'Frame the back wall', text: `Frame the back wall flat on the deck and tilt it up between the posts: 2x4 bottom plate, studs at ${inch(P.studSpacing)} on centre, and ${blockLevels.length} rows of flat blocking — the vertical corrugated siding is nailed to these. Nail the studs and plates into the posts.` },
-    { title: 'Frame the front wall & door opening', text: `Frame the front wall with a ${ftin(doorRO.w)} × ${ftin(doorRO.h)} rough opening for the ${inch(P.doorW)} door — king and trimmer studs each side and a doubled 2x6 header. The bottom plate is cut out at the door.` },
+    { title: 'Frame the front wall & door opening', text: `Frame the front wall with a ${ftin(doorRO.w)} × ${ftin(doorRO.h)} rough opening for the ${inch(P.doorW)} door, centred between two posts, with king and trimmer studs each side and a doubled 2x6 header. The bottom plate is cut out at the door.` },
     { title: 'Frame the end walls & windows', text: `Frame both end walls with rough openings of ${ftin(winRO.w)} × ${ftin(winRO.h)} for the louvre windows, sill at ${ftin(sill)} above the floor${nWin > 2 ? ` (${nWin} windows in total — larger houses get an extra window per bay)` : ''}. Add the double top plate, lapping the corners, and strap every post to the plate. Brace the walls plumb.` },
     { title: 'Roof framing', text: shed ? `Single-slope (shed) roof at ${P.pitch}:12. The front wall is ${ftin(topFront - topBack)} taller than the back. Set ${rafterXs.length} ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre with ${inch(E)} eave overhangs, each tied to both plates with a hurricane tie.` : `Gable roof at ${P.pitch}:12. Raise the 2x6 ridge board on temporary props, then set ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre with ${inch(E)} eave overhangs. Tie every rafter to the plate with a hurricane tie and add ceiling ties on alternate pairs to stop the walls spreading. Fill the gable ends with studs. Nail 1x6 fascia to the rafter tails.` },
     { title: 'Purlins', text: `Nail 2x4 purlins flat across the rafters, ${slopes.map((s) => s.purlins).join(' + ')} rows at no more than ${inch(P.purlinSpacing)} apart, overhanging the gable ends by ${inch(R)}. The corrugated sheets fasten to these.` },
@@ -944,7 +950,7 @@ export function design(P) {
     },
     info: {
       posts: posts.length, nx, nRows, rafterSize, diag, floorArea, roofAreaFt2, roofPlanFt2, rainGal, maxPost,
-      risers: nR, rise: r, studCount, topFront, topBack, yBb, sill, nWin,
+      risers: nR, rise: r, nFront: fxs.length, studCount, topFront, topBack, yBb, sill, nWin,
       ridgeHeight: roofTop(shed ? D + E : D / 2),
     },
   };

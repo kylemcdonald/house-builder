@@ -73,11 +73,11 @@ function woodTextures(dark, light, seed, streak = 1) {
   const height = new Float32Array(W * H);
   const map = canvasTex(W, H, (x, y) => {
     const u = x / W, v = y / H;
-    const warp = N.fbm(u * 4, v * 3, 4, 3) * 2.2;
-    const ring = 0.5 + 0.5 * Math.sin((v * 22 + warp * 3 + N.fbm(u * 2, v * 2, 2, 2) * 2) * Math.PI);
-    const fine = N.fbm(u * 64, v * 24, 64, 24, 3);
-    const streaks = N.fbm(u * 6, v * 60, 6, 60, 2);
-    let t = clamp01(0.25 + 0.45 * Math.pow(ring, 1.6) * streak + 0.25 * (fine - 0.5) + 0.35 * (streaks - 0.5));
+    const warp = N.fbm(u * 2, v * 2, 2, 2) * 1.2;
+    const ring = 0.5 + 0.5 * Math.sin((v * 46 + warp * 2.5 + N.fbm(u * 3, v * 4, 3, 4) * 1.5) * Math.PI);
+    const fine = N.fbm(u * 96, v * 40, 96, 40, 3);
+    const streaks = N.fbm(u * 3, v * 110, 3, 110, 3);
+    let t = clamp01(0.42 + 0.22 * Math.pow(ring, 2) * streak + 0.18 * (fine - 0.5) + 0.55 * (streaks - 0.5));
     height[y * W + x] = t;
     const c = mix3(dark, light, t);
     const knot = N.fbm(u * 3 + 7, v * 3 + 3, 3, 3);
@@ -214,7 +214,7 @@ export function makeMaterials(mode) {
     M.wood = wood(T.wood);
     M.plyFloor = new THREE.MeshStandardMaterial({ map: T.ply, roughness: 0.7, color: 0xe8d2b8 });
     M.plyWall = new THREE.MeshStandardMaterial({ map: T.ply, roughness: 0.72, side: THREE.DoubleSide, color: 0xffffff });
-    M.tin = new THREE.MeshStandardMaterial({ color: 0xc9cdd1, metalness: 0.92, roughness: 0.34, roughnessMap: T.spangle, side: THREE.DoubleSide, envMapIntensity: 1.0 });
+    M.tin = new THREE.MeshStandardMaterial({ color: 0xb4b9be, metalness: 0.9, roughness: 0.42, roughnessMap: T.spangle, side: THREE.DoubleSide, envMapIntensity: 1.0 });
     M.pvc = new THREE.MeshPhysicalMaterial({ color: 0xe6e9e6, metalness: 0, roughness: 0.42, clearcoat: 0.35, clearcoatRoughness: 0.35, side: THREE.DoubleSide, sheen: 0.2 });
     M.concrete = new THREE.MeshStandardMaterial({ map: T.concrete.map, bumpMap: T.concrete.bump, bumpScale: 1.2, roughness: 0.95 });
     M.block = new THREE.MeshStandardMaterial({ map: T.block.map, bumpMap: T.block.bump, bumpScale: 1.2, roughness: 0.95 });

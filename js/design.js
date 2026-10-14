@@ -457,7 +457,7 @@ export function design(P) {
       for (let u = lo[a]; u <= hi[a] + 0.01; u += g) wire(u - r / 2, u + r / 2, c0, c1, yb);
     }
     b.box(Pt, W - Pt, y0 - T - 0.1, y0 - T, Pt, D - Pt, { mat: 'plastic', name: '6-mil plastic under the floor', group: 'floor', step: STEP.FLOOR_PREP, stepTo: STEP.FLOOR_PREP, ex: ex0 });
-    b.box(Pt, W - Pt, y0 - T, y0, Pt, D - Pt, { mat: 'concrete', name: `New floor slab, ${inch(T)} thick`, group: 'floor', step: STEP.FLOOR, ex: [0, -0.8 * EX, 0] });
+    b.box(Pt, W - Pt, y0 - T, y0, Pt, D - Pt, { mat: 'slab', name: `New floor slab, ${inch(T)} thick`, group: 'floor', step: STEP.FLOOR, ex: [0, -0.8 * EX, 0] });
     concreteFt3 = ((W - 2 * Pt) * (D - 2 * Pt) * T) / 1728;
   }
   const cementNet = concreteFt3 / BAG_YIELD_FT3;

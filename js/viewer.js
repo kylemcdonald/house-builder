@@ -5,7 +5,8 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { makeMaterials, groundTextureRepeat } from './materials.js';
+import { makeMaterials, TINT } from './materials.js';
+import { palmGrove } from './scenery.js';
 import { boxGeometry, sheetGeometry, cylGeometry, prismGeometry, hardwareGeometry } from './geometry.js';
 import { ftin } from './format.js';
 
@@ -24,46 +25,115 @@ function gradientTexture(top, bottom) {
   return t;
 }
 
-function skyTexture(sun) {
-  const W = 1024, H = 512;
-  const c = document.createElement('canvas');
-  c.width = W;
-  c.height = H;
-  const g = c.getContext('2d');
-  const img = g.createImageData(W, H);
-  const sAz = Math.atan2(sun.x, sun.z);
-  const sEl = Math.asin(sun.y);
-  const zen = [92, 146, 208], hor = [200, 222, 236], gnd = [190, 172, 138];
-  for (let y = 0; y < H; y++) {
-    const el = (0.5 - y / H) * Math.PI;
-    for (let x = 0; x < W; x++) {
-      const az = (x / W) * 2 * Math.PI - Math.PI;
-      let col;
-      if (el >= 0) {
-        const t = Math.pow(Math.sin(el), 0.5);
-        col = hor.map((h, i) => h + (zen[i] - h) * t);
-      } else {
-        const t = Math.pow(-Math.sin(el), 0.35);
-        col = hor.map((h, i) => h + (gnd[i] - h) * Math.min(1, t * 1.4));
+// Clear tropical sky, in linear HDR units. The same colours drive the
+// fog, so the ground fades into the horizon without a seam.
+const EXPOSURE = 0.62;
+const SKY = { zen: [0.085, 0.19, 0.44], hor: [0.58, 0.68, 0.82], gnd: [0.3, 0.28, 0.24] };
+const SUN = (() => {
+  const el = THREE.MathUtils.degToRad(52), az = THREE.MathUtils.degToRad(-35);
+  return new THREE.Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az));
+})();
+
+function skyMesh() {
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      uSun: { value: SUN.clone() },
+      uZen: { value: new THREE.Vector3(...SKY.zen) },
+      uHor: { value: new THREE.Vector3(...SKY.hor) },
+      uGnd: { value: new THREE.Vector3(...SKY.gnd) },
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vDir;
+      void main() {
+        vDir = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uSun, uZen, uHor, uGnd;
+      varying vec3 vDir;
+      float h31(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.zyx + 31.32); return fract((p.x + p.y) * p.z); }
+      float vn(vec3 p) {
+        vec3 i = floor(p), f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(h31(i), h31(i + vec3(1, 0, 0)), f.x), mix(h31(i + vec3(0, 1, 0)), h31(i + vec3(1, 1, 0)), f.x), f.y),
+                   mix(mix(h31(i + vec3(0, 0, 1)), h31(i + vec3(1, 0, 1)), f.x), mix(h31(i + vec3(0, 1, 1)), h31(i + vec3(1, 1, 1)), f.x), f.y), f.z);
       }
-      const cosd = Math.sin(el) * Math.sin(sEl) + Math.cos(el) * Math.cos(sEl) * Math.cos(az - sAz);
-      const glow = Math.pow(Math.max(cosd, 0), 30) * 70 + Math.pow(Math.max(cosd, 0), 600) * 255;
-      const i = (y * W + x) * 4;
-      img.data[i] = Math.min(255, col[0] + glow);
-      img.data[i + 1] = Math.min(255, col[1] + glow * 0.95);
-      img.data[i + 2] = Math.min(255, col[2] + glow * 0.8);
-      img.data[i + 3] = 255;
-    }
+      float fbm(vec3 p) { float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * vn(p); p = p * 2.07 + 13.7; a *= 0.5; } return s; }
+      void main() {
+        vec3 d = normalize(vDir);
+        float h = d.y;
+        float cs = max(dot(d, uSun), 0.0);
+        vec3 c;
+        if (h < 0.0) {
+          c = mix(uHor, uGnd, smoothstep(0.0, 0.2, -h));
+        } else {
+          c = mix(uHor, uZen, pow(h, 0.55));
+          c = mix(c, uHor * 1.04, exp(-h * 18.0) * 0.5);
+          c += vec3(1.0, 0.93, 0.82) * (0.12 * pow(cs, 5.0) + 0.45 * pow(cs, 48.0) + 3.0 * pow(cs, 900.0));
+          // fair-weather cumulus on a flat layer
+          vec2 cp = d.xz / (h + 0.07);
+          float n = fbm(vec3(cp * 0.42 + vec2(3.1, 7.7), 0.5));
+          float n2 = fbm(vec3(cp * 1.9, 4.0));
+          float dens = smoothstep(0.52, 0.72, n * 0.85 + n2 * 0.25) * smoothstep(0.0, 0.1, h);
+          float top = smoothstep(0.25, 0.85, n2 + dot(d.xz, uSun.xz) * 0.15);
+          vec3 cl = mix(vec3(0.5, 0.56, 0.66), vec3(1.35, 1.32, 1.26), top) * (1.0 + 0.9 * pow(cs, 10.0));
+          c = mix(c, cl, dens * 0.92);
+          c += vec3(40.0, 37.0, 32.0) * smoothstep(0.99996, 0.99999, dot(d, uSun)) * (1.0 - dens);
+        }
+        gl_FragColor = vec4(c, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+    side: THREE.BackSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+  });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(30000, 48, 24), mat);
+  m.renderOrder = -10;
+  m.frustumCulled = false;
+  return m;
+}
+
+// Realistic view: per-vertex rest position (for shader noise that stays
+// put when parts explode), a per-part colour tint and a random texture
+// offset, so no two boards or sheets look the same.
+function decorate(geo, p, mesh) {
+  mesh.updateMatrix();
+  const pos = geo.attributes.position;
+  const rest = new Float32Array(pos.count * 3);
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrix);
+    rest[i * 3] = v.x;
+    rest[i * 3 + 1] = v.y;
+    rest[i * 3 + 2] = v.z;
   }
-  g.putImageData(img, 0, 0);
-  const t = new THREE.CanvasTexture(c);
-  t.mapping = THREE.EquirectangularReflectionMapping;
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
+  geo.setAttribute('aRest', new THREE.BufferAttribute(rest, 3));
+  const seed = (p.id || 0) + 0.5;
+  const [bs, hs] = TINT[p.mat] || [0, 0];
+  const b = 1 + bs * (hash(seed) - 0.5) * 2;
+  const hue = hs * (hash(seed + 7.3) - 0.5) * 2;
+  const g = hs * (hash(seed + 3.1) - 0.5);
+  const col = [b * (1 + hue), b * (1 + g), b * (1 - hue)];
+  const colors = new Float32Array(pos.count * 3);
+  for (let i = 0; i < pos.count; i++) colors.set(col, i * 3);
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  if (p.kind !== 'box' && geo.attributes.uv) {
+    const uv = geo.attributes.uv;
+    const ou = hash(seed + 11.7) * 8, ov = hash(seed + 5.9) * 8;
+    for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) + ou, uv.getY(i) + ov);
+  }
+}
+
+function hash(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
 }
 
 export class Viewer {
-  constructor(container, { tooltip = true } = {}) {
+  constructor(container, { tooltip = true, scenery = false } = {}) {
+    this.scenery = scenery;
     this.container = container;
     this.mode = 'sketch';
     this.explode = 0;
@@ -85,7 +155,7 @@ export class Viewer {
     container.appendChild(this.labelRenderer.domElement);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(40, 1, 2, 40000);
+    this.camera = new THREE.PerspectiveCamera(40, 1, 2, 60000);
     this.camera.position.set(400, 260, 500);
     this.controls = new OrbitControls(this.camera, r.domElement);
     this.controls.enableDamping = true;
@@ -136,22 +206,29 @@ export class Viewer {
     this.env.clear();
     if (this.envMap) { this.envMap.dispose(); this.envMap = null; }
     this.scene.environment = null;
+    this.scene.fog = null;
+    this.sky = null;
+    this.grove = null;
+    this.sun = null;
     const r = this.renderer;
     const realistic = this.mode === 'real';
-    r.toneMapping = realistic ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
-    r.toneMappingExposure = realistic ? 1.0 : 1;
+    r.toneMapping = realistic ? THREE.NeutralToneMapping : THREE.NoToneMapping;
+    r.toneMappingExposure = realistic ? EXPOSURE : 1;
     r.shadowMap.enabled = realistic;
     this.M = makeMaterials(realistic ? 'real' : 'sketch');
 
-    const ground = new THREE.Mesh(new THREE.CircleGeometry(4000, 64), this.M.ground);
-    ground.rotation.x = -Math.PI / 2;
+    let groundGeo;
+    if (realistic) {
+      groundGeo = new THREE.CircleGeometry(30000, 96);
+      groundGeo.rotateX(-Math.PI / 2);
+    } else {
+      groundGeo = new THREE.CircleGeometry(4000, 64);
+      groundGeo.rotateX(-Math.PI / 2);
+    }
+    const ground = new THREE.Mesh(groundGeo, this.M.ground);
     ground.receiveShadow = true;
     ground.renderOrder = -1;
     ground.userData.ground = true;
-    groundTextureRepeat(this.M, 8000);
-    if (this.M.ground.map) {
-      ground.geometry.attributes.uv.array.forEach((_, i, a) => (a[i] = a[i]));
-    }
     this.env.add(ground);
     this.ground = ground;
 
@@ -167,39 +244,46 @@ export class Viewer {
       this.composer = null;
     } else {
       this.headLight = null;
-      const sun = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(40), THREE.MathUtils.degToRad(140));
-      // equirectangular gradient sky, used for the background and reflections
-      const skyTex = skyTexture(sun);
+      // the sky dome follows the camera; a copy at the origin is baked into
+      // a prefiltered environment map for reflections and sky light
       const pm = new THREE.PMREMGenerator(r);
-      this.envMap = pm.fromEquirectangular(skyTex).texture;
+      const skyScene = new THREE.Scene();
+      skyScene.add(skyMesh());
+      this.envMap = pm.fromScene(skyScene, 0, 10, 50000).texture;
       pm.dispose();
       this.scene.environment = this.envMap;
       this.scene.environmentIntensity = 1.0;
-      this.scene.background = skyTex;
-      const sunL = new THREE.DirectionalLight(0xfff1dc, 3.6);
-      sunL.position.copy(sun).multiplyScalar(1500);
+      this.scene.background = null;
+      this.sky = skyMesh();
+      this.env.add(this.sky);
+      this.scene.fog = new THREE.FogExp2(new THREE.Color().setRGB(...SKY.hor), 0.000055);
+
+      const sunL = new THREE.DirectionalLight(0xfff4e6, 7.5);
+      sunL.position.copy(SUN).multiplyScalar(1500);
       sunL.castShadow = true;
       sunL.shadow.mapSize.set(4096, 4096);
-      sunL.shadow.bias = -0.0004;
-      sunL.shadow.normalBias = 0.6;
-      sunL.shadow.radius = 3;
+      sunL.shadow.bias = -0.0003;
+      sunL.shadow.normalBias = 0.4;
       this.sun = sunL;
       this.env.add(sunL);
       this.env.add(sunL.target);
-      this.env.add(new THREE.HemisphereLight(0xffffff, 0xd8c39a, 0.6));
       this.updateShadowBounds();
       try {
         const w = this.container.clientWidth || 1;
         const h = this.container.clientHeight || 1;
-        const comp = new EffectComposer(r);
+        const pr = Math.min(window.devicePixelRatio, 2);
+        // multisampled HDR target: the corrugations alias badly without it
+        const rt = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 });
+        const comp = new EffectComposer(r, rt);
         comp.addPass(new RenderPass(this.scene, this.camera));
         const ao = new GTAOPass(this.scene, this.camera, w, h);
-        ao.updateGtaoMaterial({ radius: 24, distanceExponent: 1.5, thickness: 6, scale: 1.2 });
-        ao.blendIntensity = 0.85;
+        ao.updateGtaoMaterial({ radius: 30, distanceExponent: 1.6, thickness: 8, scale: 1.0, samples: 16 });
+        ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+        ao.blendIntensity = 1.0;
         comp.addPass(ao);
         comp.addPass(new OutputPass());
+        comp.setPixelRatio(pr);
         comp.setSize(w, h);
-        comp.setPixelRatio(Math.min(window.devicePixelRatio, 2));
         this.composer = comp;
       } catch (e) {
         console.warn('AO disabled', e);
@@ -220,6 +304,17 @@ export class Viewer {
     this.sun.target.position.copy(c);
     const dir = this.sun.position.clone().sub(this.sun.target.position).normalize();
     this.sun.position.copy(c).addScaledVector(dir, 1500);
+    const u = this.M.ground.userData.uHouse;
+    if (u) u.value.set(min[0], min[2], max[0], max[2]);
+    if (this.scenery) {
+      const key = [min[0], min[2], max[0], max[2]].map(Math.round).join();
+      if (key !== this.groveKey || !this.grove || this.grove.parent !== this.env) {
+        if (this.grove) this.env.remove(this.grove);
+        this.grove = palmGrove(this.bounds);
+        this.groveKey = key;
+        this.env.add(this.grove);
+      }
+    }
   }
 
   setMode(mode) {
@@ -281,6 +376,7 @@ export class Viewer {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.fromArray(p.pos);
       if (p.quat) mesh.quaternion.fromArray(p.quat);
+      if (!sketch) decorate(geo, p, mesh);
       mesh.userData.part = p;
       mesh.userData.base = mesh.position.clone();
       mesh.castShadow = !sketch && p.mat !== 'glass' && p.mat !== 'hole';
@@ -437,6 +533,15 @@ export class Viewer {
 
   tick() {
     this.controls.update();
+    if (this.sky) {
+      this.sky.position.copy(this.camera.position);
+      // eye adaptation: open up the exposure when the camera is indoors
+      const c = this.camera.position, b = this.bounds;
+      const inside = b && c.x > b.min[0] + 50 && c.x < b.max[0] - 50 && c.z > b.min[2] + 50 && c.z < b.max[2] - 50 && c.y < b.max[1] * 0.8;
+      const target = EXPOSURE * (inside && this.step >= this.maxStep ? 2.6 : 1);
+      const r = this.renderer;
+      r.toneMappingExposure += (target - r.toneMappingExposure) * (Math.abs(target - r.toneMappingExposure) < 0.01 ? 1 : 0.08);
+    }
     if (this.headLight) {
       // light from above and to the left of the viewer
       const cam = this.camera;

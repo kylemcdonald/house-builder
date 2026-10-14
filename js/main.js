@@ -203,7 +203,7 @@ function renderDoorGrid() {
 }
 
 // ------------------------------------------------------------ viewers
-const viewer = new Viewer($('#viewport'));
+const viewer = new Viewer($('#viewport'), { scenery: true });
 let shipViewer = null;
 viewer.setMode(renderMode);
 

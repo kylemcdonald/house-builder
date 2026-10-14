@@ -117,6 +117,8 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .dg-cell:has(input:checked) { background: var(--accent-soft); outline: 1.5px solid var(--accent); }
 .dg-cell input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 .dg-cell.dg-bad { opacity: .45; }
+.dg-cover:has(input:checked) { background: #e5e7eb; outline-color: #6b7280; }
+.dg-cover input { accent-color: #6b7280; }
 
 /* viewport */
 .viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #dfe9f1; }

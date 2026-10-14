@@ -70,29 +70,52 @@ export function shippingLayout(bom, P) {
   }
   const cement = bom.lines.find((x) => x.key === 'cement');
   if (cement) {
-    const n = cement.buy;
-    const per = 6;
-    const layers = Math.ceil(n / per);
+    // pallets of up to 60 bags (10 layers of 6)
+    let left = cement.buy;
+    let pal = 0;
+    const nPal = Math.ceil(cement.buy / 60);
+    while (left > 0) {
+      const n = Math.min(60, left);
+      left -= n;
+      pal++;
+      const per = 6;
+      const layers = Math.ceil(n / per);
+      gens.push({
+        name: `Cement pallet ${pal} of ${nPal}`, qty: `${n} bags`, L: 48, Wd: 48, H: layers * 6 + 5, lb: (cement.lb / cement.buy) * n + 40,
+        draw(x, z) {
+          box(x, x + 48, 0, 5, z, z + 48, 'wood', 'Pallet', '');
+          for (let i = 0; i < n; i++) {
+            const k = i % per;
+            const r = Math.floor(i / per);
+            const [bx, bz, sx, sz] = r % 2 ? [Math.floor(k / 2) * 16, (k % 2) * 24, 16, 24] : [(k % 2) * 24, Math.floor(k / 2) * 16, 24, 16];
+            box(x + bx + 0.3, x + bx + sx - 0.3, 5 + r * 6, 5 + r * 6 + 5.8, z + bz + 0.3, z + bz + sz - 0.3, 'concrete', 'Cement bag 40 kg', `${i + 1} of ${n}`);
+          }
+        },
+      });
+    }
+  }
+  const rebar = bom.lines.find((x) => x.key === 'rebar');
+  if (rebar) {
+    const n = rebar.buy;
+    const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
+    const layers = Math.ceil(n / cols);
     gens.push({
-      name: 'Cement 40 kg bags', qty: `${n} bags`, L: 48, Wd: 48, H: layers * 6, lb: cement.lb,
+      name: 'Rebar 20 ft (tied bundle)', qty: `${n} bars`, L: 240, Wd: cols * 0.6, H: layers * 0.6, lb: rebar.lb,
       draw(x, z) {
         for (let i = 0; i < n; i++) {
-          const k = i % per;
-          const r = Math.floor(i / per);
-          const odd = r % 2;
-          // alternate the bag direction each layer like a pallet
-          const [bx, bz, sx, sz] = odd ? [Math.floor(k / 2) * 16, (k % 2) * 24, 16, 24] : [(k % 2) * 24, Math.floor(k / 2) * 16, 24, 16];
-          box(x + bx + 0.3, x + bx + sx - 0.3, r * 6, r * 6 + 5.8, z + bz + 0.3, z + bz + sz - 0.3, 'concrete', 'Cement bag 40 kg', `${i + 1} of ${n}`);
+          const c = i % cols;
+          const r = Math.floor(i / cols);
+          box(x, x + 240, r * 0.6, r * 0.6 + 0.5, z + c * 0.6, z + c * 0.6 + 0.5, 'rebar', '1/2" rebar × 20\'', `${i + 1} of ${n}`);
         }
       },
     });
   }
-  const blocks = bom.lines.find((x) => x.key === 'block');
-  if (blocks) {
+  const plastic = bom.lines.find((x) => x.key === 'plastic');
+  if (plastic) {
     gens.push({
-      name: 'Hollow blocks', qty: `${blocks.buy}`, L: blocks.buy * 16.2, Wd: 8, H: 8, lb: blocks.lb,
+      name: 'Plastic sheeting rolls', qty: `${plastic.buy} rolls`, L: 120, Wd: plastic.buy * 7, H: 7, lb: plastic.lb,
       draw(x, z) {
-        for (let i = 0; i < blocks.buy; i++) box(x + i * 16.2, x + i * 16.2 + 15.6, 0, 7.6, z, z + 7.6, 'block', 'Cement hollow block', '');
+        for (let i = 0; i < plastic.buy; i++) parts.push({ id: id++, kind: 'cyl', r: 3.4, h: 120, pos: [x + 60, 3.5, z + i * 7 + 3.5], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'plastic', name: plastic.name, info: '' });
       },
     });
   }
@@ -131,7 +154,7 @@ export function shippingLayout(bom, P) {
 
   // Shelf layout on the "deck"
   gens.sort((a, b) => b.L - a.L || b.Wd - a.Wd);
-  const maxRow = 300;
+  const maxRow = 480;
   const gap = 30;
   let x = 0;
   let z = 0;

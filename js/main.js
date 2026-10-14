@@ -47,47 +47,54 @@ try { renderMode = localStorage.getItem('polowat-render') || 'sketch'; } catch {
 const plyOpts = Object.entries(PLY).map(([k, v]) => [k, v.name]);
 const ADV = [
   {
-    title: 'Structure', open: false, fields: [
-      { k: 'floorHeight', label: 'Floor height above ground', min: 18, max: 72, step: 1, fmt: ftin },
-      { k: 'wallHeight', label: 'Wall height', min: 84, max: 120, step: 1, fmt: ftin },
-      { k: 'pitch', label: 'Roof pitch', min: 2, max: 8, step: 0.5, fmt: (v) => `${v}:12` },
-      { k: 'eave', label: 'Eave overhang', min: 0, max: 30, step: 1, fmt: inch },
-      { k: 'rake', label: 'Gable-end overhang', min: 0, max: 18, step: 1, fmt: inch },
-      { k: 'postSpacing', label: 'Max post spacing', min: 48, max: 96, step: 6, fmt: ftin },
-      { k: 'joistSpan', label: 'Max joist span', min: 72, max: 144, step: 6, fmt: ftin, hint: 'Adds a beam line when the depth exceeds this' },
-      { k: 'joistSpacing', label: 'Joist spacing', type: 'select', opts: [[12, '12" o.c.'], [16, '16" o.c.'], [24, '24" o.c.']] },
-      { k: 'studSpacing', label: 'Stud spacing', type: 'select', opts: [[16, '16" o.c.'], [24, '24" o.c.']] },
-      { k: 'rafterSpacing', label: 'Rafter spacing', type: 'select', opts: [[16, '16" o.c.'], [24, '24" o.c.']] },
-      { k: 'purlinSpacing', label: 'Max purlin spacing', min: 16, max: 32, step: 1, fmt: inch },
-      { k: 'embed', label: 'Post depth in ground', min: 24, max: 60, step: 1, fmt: ftin },
-      { k: 'holeDia', label: 'Footing hole diameter', min: 10, max: 24, step: 1, fmt: inch },
-    ],
-  },
-  {
-    title: 'Openings & stairs', open: false, fields: [
+    title: 'Doors & windows', open: true, fields: [
+      { k: 'doorsFront', label: 'Doors on front (long) wall', type: 'num', min: 0, max: 6 },
+      { k: 'doorsBack', label: 'Doors on back (long) wall', type: 'num', min: 0, max: 6 },
+      { k: 'doorsSide', label: 'Doors on each end wall', type: 'num', min: 0, max: 4 },
+      { k: 'winSpacing', label: 'Max window spacing', min: 4, max: 30, step: 0.5, fmt: (v) => ftin(v * 12), hint: 'Windows are spread along every wall no further apart than this; doors take the place of a window' },
       { k: 'windowW', label: 'Louvre blade length (window width)', type: 'select', opts: [[3, '3 ft'], [4, '4 ft']] },
       { k: 'windowH', label: 'Louvre frame height', type: 'select', opts: [[3, '3 ft'], [4, '4 ft']] },
       { k: 'sill', label: 'Window sill height', min: 12, max: 48, step: 1, fmt: ftin },
       { k: 'doorW', label: 'Door width', min: 24, max: 40, step: 1, fmt: inch },
       { k: 'doorH', label: 'Door height', min: 72, max: 84, step: 1, fmt: ftin },
-      { k: 'stairW', label: 'Stair width', min: 24, max: 48, step: 1, fmt: ftin },
+    ],
+  },
+  {
+    title: 'Foundation', open: false, fields: [
+      { k: 'foundation', label: 'Foundation type', type: 'select', str: true, opts: [['slab', 'Solid concrete slab'], ['edge', '4" slab with thickened edge']] },
+      { k: 'slabT', label: 'Foundation thickness', min: 4, max: 24, step: 1, fmt: inch, hint: 'Slab thickness, or edge-beam depth for a thickened-edge slab' },
+      { k: 'slabAbove', label: 'Slab top above grade', min: 0, max: 18, step: 1, fmt: inch },
+      { k: 'embed', label: 'Post depth below slab top', min: 12, max: 60, step: 1, fmt: ftin },
+      { k: 'holeDia', label: 'Post footing diameter', min: 10, max: 24, step: 1, fmt: inch },
+      { k: 'rebarSpacing', label: 'Rebar grid', type: 'select', opts: [[12, '12" o.c.'], [16, '16" o.c.'], [18, '18" o.c.'], [24, '24" o.c.']] },
+    ],
+  },
+  {
+    title: 'Structure', open: false, fields: [
+      { k: 'midPosts', label: 'Posts between corners (each wall)', min: 0, max: 8, step: 1, fmt: (v) => `${v}` },
+      { k: 'wallHeight', label: 'Wall height', min: 84, max: 120, step: 1, fmt: ftin },
+      { k: 'pitch', label: 'Roof pitch', min: 2, max: 8, step: 0.5, fmt: (v) => `${v}:12` },
+      { k: 'eave', label: 'Eave overhang', min: 0, max: 30, step: 1, fmt: inch },
+      { k: 'rake', label: 'Gable-end overhang', min: 0, max: 18, step: 1, fmt: inch },
+      { k: 'studSpacing', label: 'Stud spacing', type: 'select', opts: [[16, '16" o.c.'], [24, '24" o.c.']] },
+      { k: 'rafterSpacing', label: 'Rafter spacing', type: 'select', opts: [[16, '16" o.c.'], [24, '24" o.c.']] },
+      { k: 'purlinSpacing', label: 'Max purlin spacing', min: 16, max: 32, step: 1, fmt: inch },
     ],
   },
   {
     title: 'Sheet materials', open: false, fields: [
-      { k: 'floorPly', label: 'Floor plywood', type: 'select', opts: plyOpts, str: true },
       { k: 'wallPly', label: 'Inner wall plywood', type: 'select', opts: plyOpts, str: true },
       { k: 'tinCover', label: 'Corrugated sheet cover width', min: 24, max: 40, step: 1, fmt: inch, hint: 'Usable width per sheet after the side lap' },
     ],
   },
   {
-    title: 'Overage / contingency', open: true, fields: [
+    title: 'Overage / contingency', open: false, fields: [
       { k: 'ovTin', label: 'Roofing & outer walls (tin/PVC)', type: 'pct' },
-      { k: 'ovPly', label: 'Floor & inner wall plywood', type: 'pct' },
-      { k: 'ovFraming', label: 'Framing lumber', type: 'pct' },
-      { k: 'ovPosts', label: 'Post & beam lumber', type: 'pct' },
+      { k: 'ovPly', label: 'Inner wall plywood', type: 'pct' },
+      { k: 'ovFraming', label: 'Framing & form lumber', type: 'pct' },
+      { k: 'ovPosts', label: 'Post lumber', type: 'pct' },
       { k: 'ovFasteners', label: 'Nails, fasteners & hardware', type: 'pct' },
-      { k: 'ovCement', label: 'Cement & blocks', type: 'pct' },
+      { k: 'ovCement', label: 'Cement & rebar', type: 'pct' },
     ],
   },
   {
@@ -111,7 +118,7 @@ function buildAdvanced() {
       if (f.type === 'select') {
         d.innerHTML = `<label for="f-${f.k}">${f.label}</label><select id="f-${f.k}">${f.opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
       } else if (f.type === 'pct' || f.type === 'num') {
-        d.innerHTML = `<label for="f-${f.k}">${f.label}${f.type === 'pct' ? ' (%)' : ''}</label><input type="number" id="f-${f.k}" min="0" step="${f.step || 1}">`;
+        d.innerHTML = `<label for="f-${f.k}">${f.label}${f.type === 'pct' ? ' (%)' : ''}</label><input type="number" id="f-${f.k}" min="${f.min ?? 0}"${f.max !== undefined ? ` max="${f.max}"` : ''} step="${f.step || 1}">`;
       } else {
         d.innerHTML = `<label for="f-${f.k}">${f.label} <span class="val" id="v-${f.k}"></span></label><input type="range" id="f-${f.k}" min="${f.min}" max="${f.max}" step="${f.step}">`;
       }
@@ -119,7 +126,9 @@ function buildAdvanced() {
       det.appendChild(d);
       const el = d.querySelector('input,select');
       el.addEventListener(f.type === 'select' ? 'change' : 'input', () => {
-        P[f.k] = f.str ? el.value : Number(el.value);
+        let v = f.str ? el.value : Number(el.value);
+        if (!f.str && f.max !== undefined) v = Math.min(f.max, Math.max(f.min ?? 0, v || 0));
+        P[f.k] = v;
         schedule();
       });
     }
@@ -182,7 +191,7 @@ function regenerate() {
   updateStepUI();
   renderBOM();
   renderNotes();
-  $('#subtitle').textContent = `${ftin(D.W)} × ${ftin(D.D)} · ${P.roof === 'shed' ? 'single-slope' : 'gable'} ${P.cladding === 'pvc' ? 'PVC' : 'metal'} roof · ${D.info.posts} posts`;
+  $('#subtitle').textContent = `${ftin(D.W)} × ${ftin(D.D)} on a concrete slab · ${D.info.posts} posts · ${D.info.nDoors} doors · ${D.info.nWin} windows`;
   $('#warnings').innerHTML = D.warnings.map((w) => `<div>⚠ ${w}</div>`).join('');
 }
 
@@ -238,7 +247,7 @@ $('#prevStep').addEventListener('click', () => { stop(); setStep(step - 1); });
 $('#nextStep').addEventListener('click', () => { stop(); setStep(step + 1); });
 {
   const ticks = $('#stepTicks');
-  const labels = { 1: 'Layout', 3: 'Posts', 5: 'Floor', 8: 'Walls', 11: 'Roof', 14: 'Siding', 17: 'Interior' };
+  const labels = { [STEP.LAYOUT]: 'Layout', [STEP.POSTS]: 'Posts', [STEP.SLAB]: 'Slab', [STEP.WALL_BACK]: 'Walls', [STEP.ROOF_FRAME]: 'Roof', [STEP.SIDING]: 'Siding', [STEP.INTERIOR]: 'Interior' };
   for (const [k, v] of Object.entries(labels)) {
     const sp = document.createElement('span');
     sp.textContent = v;
@@ -435,36 +444,33 @@ function renderShipTable() {
 // ------------------------------------------------------------ notes
 function renderNotes() {
   const i = D.info;
-  const shed = P.roof === 'shed';
+  const edge = P.foundation === 'edge';
   const specs = [
     ['Footprint', `${ftin(D.W)} × ${ftin(D.D)} (${num(i.floorArea)} sq ft)`],
-    ['Floor height', `${ftin(P.floorHeight)} above grade`],
-    ['Wall height', shed ? `${ftin(i.topBack)} back, ${ftin(i.topFront)} front` : ftin(P.wallHeight)],
-    ['Ridge / high point', `${ftin(i.ridgeHeight)} above grade`],
-    ['Posts', `${i.posts} posts on ${i.nRows} beam lines (${i.nx} per line, ${i.nFront} on the door side), 2-ply 2x6, set ${ftin(P.embed)} in concrete`],
-    ['Longest post', ftin(i.maxPost)],
-    ['Beams', 'Doubled 2x6, bolted to posts'],
-    ['Joists', `2x6 @ ${P.joistSpacing}" o.c.`],
-    ['Walls', `2x4 @ ${P.studSpacing}" o.c. with ${PLY[P.wallPly].name} inside, ${P.cladding === 'pvc' ? 'PVC' : 'metal'} corrugated outside`],
-    ['Roof', `${shed ? 'Single slope' : 'Gable'} ${P.pitch}:12, ${i.rafterSize} rafters @ ${P.rafterSpacing}" o.c., 2x4 purlins`],
-    ['Windows', `${i.nWin} aluminium louvre windows, ${P.windowW}' × ${P.windowH}'`],
-    ['Stairs', `${i.risers} risers of ${inch(i.rise)}`],
+    ['Foundation', edge ? `4" slab with a 12"-wide × ${inch(P.slabT)} thickened edge, top ${inch(P.slabAbove)} above grade` : `${inch(P.slabT)} solid concrete slab, top ${inch(P.slabAbove)} above grade`],
+    ['Concrete', `${num(i.concreteFt3)} ft³ (${num(i.concreteFt3 / 27, 1)} yd³) including post footings`],
+    ['Posts', `${i.posts} posts: 4 corners + ${i.midPosts} on every wall. Each is 2-ply 2x6, cast ${ftin(P.embed)} into the slab and footing`],
+    ['Post spacing', `${ftin(i.longSpan)} on the long walls`],
+    ['Walls', `${ftin(P.wallHeight)} high, 2x4 @ ${P.studSpacing}" o.c. with ${PLY[P.wallPly].name} inside and ${P.cladding === 'pvc' ? 'PVC' : 'metal'} corrugated outside`],
+    ['Roof', `Gable ${P.pitch}:12, ${i.rafterSize} rafters @ ${P.rafterSpacing}" o.c., 2x4 purlins`],
+    ['Ridge height', `${ftin(i.ridgeHeight)} above grade`],
+    ['Doors', `${i.nDoors} (${P.doorsFront} front, ${P.doorsBack} back, ${P.doorsSide} on each end)`],
+    ['Windows', `${i.nWin} aluminium louvre windows, ${P.windowW}' × ${P.windowH}', at most ${ftin(P.winSpacing * 12)} apart`],
     ['Layout diagonal', ftin(i.diag)],
     ['Rainwater', `≈ ${num(i.rainGal)} gal per inch of rain off ${num(i.roofPlanFt2)} sq ft of roof`],
   ];
   const notes = [
-    ['Pole-frame construction', 'Posts run continuously from the footing to the wall plate, as in the reference photos. This ties the roof to the ground in one load path — the single best defence against typhoon uplift.'],
-    ['Laminated posts', 'The shop has no 4x4 or 6x6, so each post is two 2x6s nailed together (12" o.c., staggered). They are straighter than solid timber, and splices can be staggered when a post is longer than 16\'.'],
-    ['Raised floor', `The floor sits ${ftin(P.floorHeight)} above grade: clear of storm surge and puddles, ventilated underneath, and easy to inspect for termites. The design adds a third beam line automatically when the depth passes the joist span.`],
-    ['Concrete details', 'Each post sits on 4" of concrete, and the concrete is crowned 2" above grade so water runs away from the wood. Post bases are wrapped in bitumen or plastic. Rinse beach sand with fresh water — salt weakens concrete — and use crushed coral as aggregate.'],
-    ['Hurricane ties everywhere', 'Galvanised ties at every joist-to-beam and rafter-to-plate joint, straps from every post to the top plate, and two 1/2" bolts per beam-to-post joint. The ties are cheap and do a lot.'],
-    ['Corrugated siding needs nailers', 'Vertical corrugated sheets fasten to horizontal members, so every wall has rows of flat 2x4 blocking (girts) between the studs, as in the reference photo.'],
-    ['Cross-ventilation', 'Louvre windows sit on opposite end walls, and the eaves are left open above the wall plate. Orient the house so the windows catch the NE trade winds. Add insect screen behind the louvres.'],
-    ['Overhangs', `${inch(P.eave)} eaves and ${inch(P.rake)} gable overhangs shade the walls and keep rain off the siding. Corrugated sheets lap one corrugation at the sides; fasten through the crests with sealing washers.`],
-    ['Rainwater catchment', `Fresh water is precious on an atoll. The roof collects about ${num(i.rainGal)} gallons per inch of rain — a gutter on the eave and a tank are strongly recommended (not included in the BOM).`],
+    ['Posts cast into the slab', 'Every post sits in its own footing hole below the slab, and the hole and slab are poured together. The wall frame and roof are tied straight into the concrete — the main defence against typhoon uplift.'],
+    ['Laminated posts', 'The shop has no 4x4s or 6x6s, so each post is two 2x6s nailed together (12" o.c., staggered). They come out straighter than solid timber.'],
+    ['Keep wood out of the wet', `The slab top is ${inch(P.slabAbove)} above grade and the siding laps over its edge so rain drips clear. Wall plates sit on a plastic or bitumen strip, and the cast-in part of each post is wrapped. Slope the slab slightly toward the doors.`],
+    [edge ? 'Thickened-edge slab' : 'Concrete quantity', edge ? 'A 4" slab with a deep edge beam uses far less cement than a solid slab while keeping the perimeter (where the walls and posts are) deep and strong.' : `A solid ${inch(P.slabT)} slab is a lot of concrete — about ${num(i.concreteFt3 / 27, 1)} yd³, all mixed by hand, with sand, aggregate and fresh water to match. Switching to a 4" slab with a thickened edge (Foundation → type) cuts the cement by more than half.`],
+    ['Concrete details', 'Rebar on chairs at mid-depth stops shrinkage cracks. Rinse beach sand with fresh water (salt attacks the rebar) and use crushed coral as aggregate. Keep the slab damp for a week while it cures.'],
+    ['Hurricane ties', 'A galvanised tie at every rafter-to-plate joint, straps from every post to the top plate, and J-bolts holding the plates to the slab.'],
+    ['Siding nailers', 'Vertical corrugated sheets fasten to horizontal members, so every wall has rows of flat 2x4 blocking between the studs.'],
+    ['Windows & doors', `Doors go in the bays between posts, spread evenly along each wall. Windows fill the rest of the wall, no more than ${ftin(P.winSpacing * 12)} apart, and slide sideways to clear posts. With louvres on all four walls and open eaves, the house cross-ventilates from any wind direction.`],
+    ['Rainwater catchment', `The roof collects about ${num(i.rainGal)} gallons per inch of rain. Gutters on both eaves feeding a tank are strongly recommended (not in the BOM).`],
     ['Metal vs PVC', 'Galvanised steel is cheaper but rusts in the salt air, especially at cut edges and fasteners. PVC "tinroof" costs a little more but never rusts. With PVC, pre-drill oversized holes for thermal movement and keep purlins at 24" or less.'],
-    ['Stairs first', 'Building the stairs right after the floor gives the crew safe access for the rest of the job. The stair footing is concrete-filled hollow blocks.'],
-    ['Auto-sizing', 'Change the width and depth and the model redesigns itself: the number of posts and beam lines, joist and stud layout, window count (extra back-wall windows on long houses), door position (kept clear of posts), stair geometry, rafter size (2x4 → 2x6 for longer spans), and sheet lengths.'],
+    ['Auto-sizing', 'Change the width and depth and the model redesigns itself: post positions, studs, blocking, door and window positions, rafter size (2x4 → 2x6 for longer spans), rebar grid, and sheet lengths.'],
   ];
   let h = `<h2>Design notes</h2>`;
   if (D.warnings.length) h += `<div class="warnings" style="position:static;max-width:none;margin-bottom:12px">${D.warnings.map((w) => `<div>⚠ ${w}</div>`).join('')}</div>`;
@@ -475,7 +481,7 @@ function renderNotes() {
     <li>The cement price was taped over on the shop sign; ${money(prices.cement.price)} per 40 kg bag is a placeholder. Prices marked <span class="badge">est.</span> are not on the sign.</li>
     <li>Louvre frames are assumed to be sold by height (3' or 4') and glass blades by length (3' or 4' — this sets the window width). About one blade per 3-1/2" of frame height.</li>
     <li>Corrugated sheets are assumed to be 33" wide with ${inch(P.tinCover)} of cover. Measure a sheet in the shop and adjust under “Sheet materials”.</li>
-    <li>Concrete is a 1 : 2 : 3 mix, which gives about 3.7 ft³ per 40 kg bag.</li>
+    <li>Concrete is a 1 : 2 : 3 mix, which gives about 3.7 ft³ per 40 kg bag. Rebar, tie wire, plastic and J-bolts are not on the shop sign, so their prices are estimates.</li>
     <li>This is a planning tool, not a stamped engineering design. Have someone experienced with local typhoon construction review it.</li>
   </ul>`;
   $('#notesDoc').innerHTML = h;

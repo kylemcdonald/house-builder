@@ -188,6 +188,8 @@ const SKETCH = {
   hole: 0x4a3b2a,
   string: 0xff3b30,
   stringDiag: 0x2f7cf6,
+  rebar: 0x9a5a36,
+  plastic: 0x3a4652,
 };
 
 export function makeMaterials(mode) {
@@ -226,6 +228,8 @@ export function makeMaterials(mode) {
     M.string = new THREE.MeshStandardMaterial({ color: 0xff4a3a, roughness: 0.8 });
     M.stringDiag = new THREE.MeshStandardMaterial({ color: 0x2f7cf6, roughness: 0.8 });
     M.ground = new THREE.MeshStandardMaterial({ map: T.sand, roughness: 1, color: 0xffffff });
+    M.rebar = new THREE.MeshStandardMaterial({ color: 0x6b3d24, metalness: 0.6, roughness: 0.75 });
+    M.plastic = new THREE.MeshStandardMaterial({ color: 0x1d232b, roughness: 0.3, side: THREE.DoubleSide });
     M.edge = null;
     M.edgeHL = null;
   }

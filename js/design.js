@@ -10,31 +10,33 @@ import { LUMBER, PLY, BAG_YIELD_FT3 } from './catalog.js';
 import { ftin, inch, num } from './format.js';
 
 export const DEFAULTS = {
-  width: 12, // ft
-  depth: 8, // ft
-  roof: 'gable', // 'gable' | 'shed'
+  width: 36, // ft
+  depth: 17, // ft
   cladding: 'metal', // 'metal' | 'pvc'
-  floorHeight: 36, // grade to top of floor, in
-  wallHeight: 96, // floor to top of top plate at the eave, in
+  foundation: 'slab', // 'slab' (solid) | 'edge' (4" slab with thickened edge)
+  slabT: 12, // foundation thickness (solid slab, or edge-beam depth), in
+  slabAbove: 6, // top of slab above grade, in
+  wallHeight: 96, // slab to top of top plate, in
   pitch: 4, // rise per 12
   eave: 12, // eave overhang, in
-  rake: 6, // gable/rake overhang, in
-  postSpacing: 72, // max post spacing along beams, in
-  joistSpan: 120, // max joist span before another beam line is added, in
-  joistSpacing: 16,
+  rake: 6, // gable overhang, in
+  midPosts: 2, // posts between the corners on each wall
   studSpacing: 24,
   rafterSpacing: 24,
   purlinSpacing: 24,
-  embed: 36, // post embedment below grade, in
-  holeDia: 16, // footing hole diameter, in
-  floorPly: 'ply34x',
+  embed: 36, // post depth below top of slab, in
+  holeDia: 16, // post footing hole diameter, in
+  rebarSpacing: 18, // slab rebar grid, in
   wallPly: 'ply14',
+  doorsFront: 2,
+  doorsBack: 1,
+  doorsSide: 1, // on each end wall
+  doorW: 32,
+  doorH: 80,
+  winSpacing: 10, // max window spacing along a wall, ft
   windowW: 3, // louvre blade length, ft
   windowH: 4, // louvre frame height, ft
   sill: 30, // window sill height above floor, in
-  doorW: 32,
-  doorH: 80,
-  stairW: 36,
   tinCover: 30, // effective cover width of a corrugated sheet, in
   ovTin: 10,
   ovPly: 10,
@@ -46,9 +48,8 @@ export const DEFAULTS = {
 };
 
 export const STEP = {
-  SITE: 0, LAYOUT: 1, HOLES: 2, POSTS: 3, BEAMS: 4, JOISTS: 5, FLOOR: 6, STAIRS: 7,
-  WALL_BACK: 8, WALL_FRONT: 9, WALL_ENDS: 10, ROOF_FRAME: 11, PURLINS: 12, ROOFING: 13,
-  SIDING: 14, WINDOWS: 15, DOOR: 16, INTERIOR: 17, DONE: 18,
+  SITE: 0, LAYOUT: 1, DIG: 2, POSTS: 3, SLAB: 4, WALL_BACK: 5, WALL_FRONT: 6, WALL_ENDS: 7,
+  ROOF_FRAME: 8, PURLINS: 9, ROOFING: 10, SIDING: 11, WINDOWS: 12, DOOR: 13, INTERIOR: 14, DONE: 15,
 };
 
 const EX = 24; // explode unit, inches
@@ -195,71 +196,148 @@ export function design(P) {
   const b = new Builder();
   const W = P.width * 12;
   const D = P.depth * 12;
-  const shed = P.roof === 'shed';
   const p = P.pitch / 12;
   const theta = Math.atan(p);
   const cos = Math.cos(theta);
   const sin = Math.sin(theta);
-  const Hf = P.floorHeight;
-  const plyT = PLY[P.floorPly].t;
-  const yJt = Hf - plyT;
-  const yJb = yJt - 5.5;
-  const yBt = yJb;
-  const yBb = yBt - 5.5;
-  const y0 = Hf;
+  const y0 = P.slabAbove; // floor = top of slab
   const H = P.wallHeight;
   const E = P.eave;
   const R = P.rake;
   const tinW = P.tinCover + 3;
   const warnings = [];
+  const edge = P.foundation === 'edge';
+  const slabCore = edge ? 4 : P.slabT;
+  const yS0 = y0 - P.slabT; // bottom of slab / edge beam
 
-  const rafterSpanH = shed ? D - 7 : D / 2 - 3.5;
+  const rafterSpanH = D / 2 - 3.5;
   const rafterSize = rafterSpanH > 84 ? '2x6' : '2x4';
   const rd = LUMBER[rafterSize].w;
   const yTop = y0 + H;
-  const underside = (z) => (shed ? yTop + (z - 3.5) * p : yTop + (Math.min(z, D - z) - 3.5) * p);
+  const underside = (z) => yTop + (Math.min(z, D - z) - 3.5) * p;
   const rafterTop = (z) => underside(z) + rd / cos;
   const roofTop = (z) => rafterTop(z) + 1.5;
-  const topBack = H;
-  const topFront = shed ? H + (D - 7) * p : H;
-  const endTop = (z) => (shed ? H + (Math.min(Math.max(z, 3.5), D - 3.5) - 3.5) * p : H);
 
-  // Will shed rafters need a mid-span beam?
-  const shedRafterLen = (D + 2 * E) / cos;
-  const nRows = Math.max(2, Math.ceil(D / P.joistSpan) + 1);
-  const roofBeams = shed && shedRafterLen > 192 && nRows > 2;
-  if (shed && shedRafterLen > 192 && !roofBeams) warnings.push('Shed rafters are longer than 16 ft and will need to be spliced.');
+  // ---------------------------------------------------------------- walls & openings
+  const mkWall = (key, O, U, n, L, ua, ub, sideTop, step) => ({ key, O, U, n, L, ua, ub, top: () => H, sideTop, step, posts: [], openings: [] });
+  const walls = {
+    back: mkWall('back', V(W, y0, 0), V(-1, 0, 0), V(0, 0, -1), W, 0, W, () => H, STEP.WALL_BACK),
+    front: mkWall('front', V(0, y0, D), V(1, 0, 0), V(0, 0, 1), W, 0, W, () => H, STEP.WALL_FRONT),
+    left: mkWall('left', V(0, y0, 0), V(0, 0, 1), V(-1, 0, 0), D, 3.5, D - 3.5, (u) => rafterTop(u) - y0, STEP.WALL_ENDS),
+    right: mkWall('right', V(W, y0, D), V(0, 0, -1), V(1, 0, 0), D, 3.5, D - 3.5, (u) => rafterTop(D - u) - y0, STEP.WALL_ENDS),
+  };
+  const toW = (w, u, v, d) => w.O.clone().addScaledVector(w.U, u).addScaledVector(UP, v).addScaledVector(w.n, -d);
+  const wallBox = (w, u0, u1, v0, v1, d0, d1) => {
+    const a = toW(w, u0, v0, d0);
+    const c = toW(w, u1, v1, d1);
+    return [Math.min(a.x, c.x), Math.max(a.x, c.x), Math.min(a.y, c.y), Math.max(a.y, c.y), Math.min(a.z, c.z), Math.max(a.z, c.z)];
+  };
+  const wallEx = (w, out, layer) => [w.n.x * out * EX, layer * EX, w.n.z * out * EX];
 
-  // ---------------------------------------------------------------- grid
-  const nx = Math.max(2, Math.ceil(W / P.postSpacing) + 1);
-  const xs = Array.from({ length: nx }, (_, i) => 2.75 + (i * (W - 5.5)) / (nx - 1));
-  // The door is always centred in the front wall and framed between two
-  // posts; other front posts shift out of its way.
+  const m = P.midPosts;
+  const winRO = { w: P.windowW * 12 + 1, h: P.windowH * 12 + 1 };
   const doorRO = { w: P.doorW + 2, h: P.doorH + 1.5 };
-  const doorC = W / 2;
-  const dL = doorC - doorRO.w / 2 - 3;
-  const dR = doorC + doorRO.w / 2 + 3;
-  const fx0 = xs.filter((x, i) => i === 0 || i === nx - 1 || x + 2.75 < dL - 12 || x - 2.75 > dR + 12);
-  fx0.push(dL - 2.75, dR + 2.75);
-  fx0.sort((a, b) => a - b);
-  const fxs = [fx0[0]];
-  for (const x of fx0.slice(1)) {
-    const last = fxs[fxs.length - 1];
-    const n = Math.ceil((x - last) / (P.postSpacing * 1.15));
-    for (let k = 1; k < n; k++) fxs.push(last + ((x - last) * k) / n);
-    fxs.push(x);
+  let sill = P.sill;
+  if (sill + winRO.h + 5.5 > H - 4.5) {
+    sill = Math.max(12, H - 4.5 - 5.5 - winRO.h);
+    warnings.push(`Window sill lowered to ${inch(sill)} to fit under the wall plate.`);
+  }
+  const S = P.winSpacing * 12;
+  const doorCount = { front: P.doorsFront, back: P.doorsBack, left: P.doorsSide, right: P.doorsSide };
+  // Doors go in the bays between posts; windows are spread so they are never
+  // more than S apart. Mid-wall posts slide sideways to clear an opening.
+  for (const w of Object.values(walls)) {
+    const long = w.key === 'front' || w.key === 'back';
+    const lo = long ? 5.5 : 3.5; // inside face of the corner post / corner studs
+    const hi = w.L - lo;
+    const c0 = long ? 2.75 : 1.5;
+    const posts = [];
+    for (let i = 1; i <= m; i++) posts.push(c0 + (i * (w.L - 2 * c0)) / (m + 1));
+    const zones = []; // [a, b, type]
+    const free = (a, c, ignorePost = -1) => a >= lo - 1e-6 && c <= hi + 1e-6
+      && !zones.some(([za, zc]) => overlaps(a, c, za, zc))
+      && !posts.some((pc, i) => i !== ignorePost && overlaps(a, c, pc - 2.75, pc + 2.75));
+    // try to open [a,c] by moving posts that are in the way
+    const clearFor = (a, c) => {
+      const moved = posts.slice();
+      for (let i = 0; i < posts.length; i++) {
+        if (!overlaps(a, c, posts[i] - 2.75, posts[i] + 2.75)) continue;
+        const left = a - 2.75;
+        const right = c + 2.75;
+        const opts = Math.abs(left - posts[i]) < Math.abs(right - posts[i]) ? [left, right] : [right, left];
+        const ok = opts.find((pc) => pc - 2.75 >= lo - 5.5 - 1e-6 && pc + 2.75 <= hi + 5.5 + 1e-6
+          && !zones.some(([za, zc]) => overlaps(pc - 2.75, pc + 2.75, za, zc))
+          && !moved.some((q, j) => j !== i && overlaps(pc - 2.75, pc + 2.75, q - 2.75, q + 2.75))
+          && pc - 2.75 >= (long ? 5.5 : 3.5) - 1e-6 && pc + 2.75 <= w.L - (long ? 5.5 : 3.5) + 1e-6);
+        if (ok === undefined) return false;
+        moved[i] = ok;
+      }
+      posts.splice(0, posts.length, ...moved);
+      return true;
+    };
+    const nd = doorCount[w.key];
+    const hz = doorRO.w / 2 + 3;
+    let placed = 0;
+    for (let k = 0; k < nd; k++) {
+      // centre of the k-th of nd evenly chosen bays, or evenly spaced
+      const nb = m + 1;
+      const bayW = (w.L - 2 * c0) / nb;
+      let t = nd <= nb ? c0 + (Math.min(nb - 1, Math.max(0, Math.round(((k + 0.5) * nb) / nd - 0.5))) + 0.5) * bayW : lo + ((k + 0.5) * (hi - lo)) / nd;
+      t = Math.min(hi - hz, Math.max(lo + hz, t));
+      if (zones.some(([za, zc]) => overlaps(t - hz, t + hz, za, zc)) || !clearFor(t - hz, t + hz)) continue;
+      w.openings.push({ type: 'door', u0: t - doorRO.w / 2, u1: t + doorRO.w / 2, v0: 0, v1: doorRO.h });
+      zones.push([t - hz, t + hz, 'door']);
+      placed++;
+    }
+    if (placed < nd) warnings.push(`Only ${placed} of ${nd} door${nd === 1 ? '' : 's'} fit on the ${w.key} wall.`);
+    const slots = Math.max(1, Math.ceil(w.L / S));
+    const wz = winRO.w / 2 + 3;
+    for (let k = 0; k < slots; k++) {
+      const t = (w.L * (k + 0.5)) / slots;
+      if (zones.some(([za, zc, ty]) => ty === 'door' && overlaps(t - wz, t + wz, za - 6, zc + 6))) continue;
+      // 1) slide the window to the nearest gap between posts
+      let best = null;
+      const obst = [...zones.map(([a, c]) => [a - 3, c + 3]), ...posts.map((pc) => [pc - 2.75, pc + 2.75])];
+      for (const [a, c] of subtract(lo, hi, obst)) {
+        if (c - a < 2 * wz) continue;
+        const cc = Math.min(c - wz, Math.max(a + wz, t));
+        if (best === null || Math.abs(cc - t) < Math.abs(best - t)) best = cc;
+      }
+      if (best !== null && Math.abs(best - t) > Math.min(S / 2, 24)) best = null;
+      // 2) otherwise move a post out of the way
+      if (best === null) {
+        const tc = Math.min(hi - wz, Math.max(lo + wz, t));
+        if (!zones.some(([za, zc]) => overlaps(tc - wz - 3, tc + wz + 3, za, zc)) && clearFor(tc - wz, tc + wz)) best = tc;
+      }
+      if (best === null) continue;
+      w.openings.push({ type: 'window', u0: best - winRO.w / 2, u1: best + winRO.w / 2, v0: sill, v1: sill + winRO.h });
+      zones.push([best - wz, best + wz, 'window']);
+    }
+    w.midPostU = posts.slice();
   }
 
-  const rows = [];
-  for (let k = 0; k < nRows; k++) {
-    const perim = k === 0 || k === nRows - 1;
-    const zc = k === 0 ? 1.5 : k === nRows - 1 ? D - 1.5 : (D * k) / (nRows - 1);
-    let pz, beams;
-    if (k === 0) { pz = [0, 3]; beams = [[3, 4.5], [4.5, 6]]; } else if (k === nRows - 1) { pz = [D - 3, D]; beams = [[D - 6, D - 4.5], [D - 4.5, D - 3]]; } else { pz = [zc - 1.5, zc + 1.5]; beams = [[zc - 3, zc - 1.5], [zc + 1.5, zc + 3]]; }
-    rows.push({ k, zc, perim, pz, beams, xs: k === nRows - 1 ? fxs : xs });
+  // ---------------------------------------------------------------- posts
+  const posts = [];
+  const addPost = (x0, x1, z0, z1, wall, corner) => posts.push({ x0, x1, z0, z1, xc: (x0 + x1) / 2, zc: (z0 + z1) / 2, wall, corner });
+  addPost(0, 5.5, 0, 3, 'back', true);
+  addPost(W - 5.5, W, 0, 3, 'back', true);
+  addPost(0, 5.5, D - 3, D, 'front', true);
+  addPost(W - 5.5, W, D - 3, D, 'front', true);
+  for (const u of walls.back.midPostU) addPost(W - u - 2.75, W - u + 2.75, 0, 3, 'back', false);
+  for (const u of walls.front.midPostU) addPost(u - 2.75, u + 2.75, D - 3, D, 'front', false);
+  for (const u of walls.left.midPostU) addPost(0, 3, u - 2.75, u + 2.75, 'left', false);
+  for (const u of walls.right.midPostU) addPost(W - 3, W, D - u - 2.75, D - u + 2.75, 'right', false);
+  for (const po of posts) {
+    if (po.wall === 'back') walls.back.posts.push([W - po.x1, W - po.x0]);
+    else if (po.wall === 'front') walls.front.posts.push([po.x0, po.x1]);
+    else if (po.wall === 'left') walls.left.posts.push([po.z0, po.z1]);
+    else walls.right.posts.push([D - po.z1, D - po.z0]);
   }
+  const longSpan = (W - 5.5) / (m + 1);
+  if (longSpan > 168) warnings.push(`Posts on the long walls are ${ftin(longSpan)} apart — consider more posts per wall.`);
+
   // ---------------------------------------------------------------- layout
-  const tempStrings = { mat: 'string', group: 'temp', step: STEP.LAYOUT, stepTo: STEP.HOLES, name: 'Layout string line', temp: true, ex: [0, 0, 0] };
+  const tempStrings = { mat: 'string', group: 'temp', step: STEP.LAYOUT, stepTo: STEP.DIG, name: 'Layout string line', temp: true, ex: [0, 0, 0] };
   const sy = 10;
   const st = 0.15;
   b.box(-0.05, 0.05, sy, sy + st, -30, D + 30, tempStrings);
@@ -270,7 +348,6 @@ export function design(P) {
   b.member(V(W, sy + 0.5, 0), V(0, sy + 0.5, D), { t: st, d: st }, UP, { ...tempStrings, name: 'Diagonal check string', mat: 'stringDiag' });
   const stake = { ...tempStrings, mat: 'wood', name: 'Batter board' };
   for (const [cx, cz, dx, dz] of [[0, 0, -1, -1], [W, 0, 1, -1], [0, D, -1, 1], [W, D, 1, 1]]) {
-    // L-shaped batter boards just outside each corner
     b.box(cx + dx * 18 - 12, cx + dx * 18 + 12, sy - 3.5, sy, cz + dz * 30 - 0.75, cz + dz * 30 + 0.75, stake);
     b.box(cx + dx * 30 - 0.75, cx + dx * 30 + 0.75, sy - 3.5, sy, cz + dz * 18 - 12, cz + dz * 18 + 12, stake);
     for (const [ox, oz] of [[dx * 30, dz * 30], [dx * 30, dz * 6], [dx * 6, dz * 30]]) {
@@ -278,237 +355,154 @@ export function design(P) {
     }
   }
 
-  // ---------------------------------------------------------------- posts
-  const posts = [];
-  for (const row of rows) {
-    row.xs.forEach((xc, i) => {
-      const end = i === 0 || i === row.xs.length - 1;
-      const tall = row.perim || end || roofBeams;
-      let top;
-      if (!tall) top = yBt;
-      else if (row.k === 0) top = y0 + topBack - 3;
-      else if (row.k === nRows - 1) top = y0 + topFront - 3;
-      else if (end) top = y0 + endTop(row.zc) - 3;
-      else top = underside(row.zc) - 5.5; // under a shed roof beam
-      posts.push({ row, i, xc, x0: xc - 2.75, x1: xc + 2.75, z0: row.pz[0], z1: row.pz[1], top, tall, end });
-    });
+  // ---------------------------------------------------------------- excavation
+  const digDepth = Math.max(0, -yS0);
+  b.box(0, W, 0.02, 0.12, 0, D, { mat: 'hole', name: `Excavation, ${ftin(digDepth)} deep`, group: 'footing', step: STEP.DIG, stepTo: STEP.DIG, ex: [0, 0, 0] });
+  const r = P.holeDia / 2;
+  for (const po of posts) {
+    b.cyl(po.xc, po.zc, r, 0.12, 0.3, { mat: 'hole', name: 'Post hole', group: 'footing', step: STEP.DIG, stepTo: STEP.DIG, ex: [0, 0, 0] });
   }
-  const bottom = -P.embed;
+
+  // ---------------------------------------------------------------- posts
+  const bottom = y0 - P.embed;
   let maxPost = 0;
   let shallow = 0;
   for (const po of posts) {
-    // A post just over 16' is set a little shallower instead of spliced.
-    const pb = po.top - bottom > 192 && po.top - bottom <= 200 ? po.top - 192 : bottom;
-    if (pb !== bottom) shallow = Math.max(shallow, -pb);
-    const L = po.top - pb;
+    const top = yTop - 3;
+    const pb = top - bottom > 192 && top - bottom <= 200 ? top - 192 : bottom;
+    if (pb !== bottom) shallow = Math.max(shallow, y0 - pb);
+    const L = top - pb;
     maxPost = Math.max(maxPost, L);
-    // two laminated 2x6 plies, splices staggered
-    [[po.z0, po.z0 + 1.5, 192], [po.z0 + 1.5, po.z1, 144]].forEach(([za, zb, split]) => {
-      const cuts = L > 192 + 1e-6 ? [[pb, pb + split], [pb + split, po.top]] : [[pb, po.top]];
+    const alongX = po.x1 - po.x0 > po.z1 - po.z0;
+    const plies = alongX ? [[po.z0, po.z0 + 1.5], [po.z0 + 1.5, po.z1]] : [[po.x0, po.x0 + 1.5], [po.x0 + 1.5, po.x1]];
+    plies.forEach(([a, c], k) => {
+      const split = k === 0 ? 192 : 144;
+      const cuts = L > 192 + 1e-6 ? [[pb, pb + split], [pb + split, top]] : [[pb, top]];
       for (const [ya, yb] of cuts) {
-        b.lumberBox('2x6', po.x0, po.x1, ya, yb, za, zb, {
-          name: po.tall ? 'Post ply (full height)' : 'Post ply (floor)', cat: 'structure', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0],
-        });
+        const [x0, x1, z0, z1] = alongX ? [po.x0, po.x1, a, c] : [a, c, po.z0, po.z1];
+        b.lumberBox('2x6', x0, x1, ya, yb, z0, z1, { name: po.corner ? 'Corner post ply' : 'Wall post ply', cat: 'structure', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0] });
       }
     });
-    // footing: hole, concrete with a crowned collar above grade, base wrap
-    const r = P.holeDia / 2;
-    b.cyl((po.x0 + po.x1) / 2, (po.z0 + po.z1) / 2, r, -0.2, 0.08, { mat: 'hole', name: 'Post hole', group: 'footing', step: STEP.HOLES, stepTo: STEP.HOLES, ex: [0, 0, 0] });
-    b.cyl((po.x0 + po.x1) / 2, (po.z0 + po.z1) / 2, r, pb - 4, 2, { mat: 'concrete', name: `Concrete footing ⌀${inch(P.holeDia)}`, group: 'footing', step: STEP.POSTS, ex: [0, -1.2 * EX, 0] });
-    b.box(po.x0 - 0.12, po.x1 + 0.12, -10, 6, po.z0 - 0.12, po.z1 + 0.12, { mat: 'wrap', name: 'Bitumen post-base wrap', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0] });
+    b.box(po.x0 - 0.12, po.x1 + 0.12, pb, y0 + 6, po.z0 - 0.12, po.z1 + 0.12, { mat: 'wrap', name: 'Bitumen wrap on the embedded part of the post', group: 'posts', step: STEP.POSTS, ex: [0, 0, 0] });
+    if (pb - 4 < yS0) {
+      b.cyl(po.xc, po.zc, r, pb - 4, yS0 + 0.01, { mat: 'concrete', name: `Post footing ⌀${inch(P.holeDia)} (poured with the slab)`, group: 'footing', step: STEP.SLAB, ex: [0, -1.8 * EX, 0] });
+    }
   }
-  if (shallow) warnings.push(`The tallest posts are set ${ftin(shallow)} deep (instead of ${ftin(P.embed)}) so they can be cut from one 16' board.`);
-  if (maxPost > 192 + 1e-6) warnings.push(`Tallest post is ${ftin(maxPost)} — longer than 16 ft stock, so post plies are spliced (staggered).`);
+  if (shallow) warnings.push(`Posts are set ${ftin(shallow)} below the slab top (instead of ${ftin(P.embed)}) so they can be cut from one 16' board.`);
+  if (maxPost > 192 + 1e-6) warnings.push(`Posts are ${ftin(maxPost)} — longer than 16 ft stock, so post plies are spliced (staggered).`);
 
-  // temporary bracing on corner posts while concrete cures
-  const corner = posts.filter((po) => po.row.perim && po.end);
-  for (const po of corner) {
-    const cx = (po.x0 + po.x1) / 2;
-    const cz = (po.z0 + po.z1) / 2;
+  // temporary bracing on corner posts until the walls are up
+  for (const po of posts.filter((x) => x.corner)) {
     const dx = po.xc < W / 2 ? -1 : 1;
-    const dz = po.row.k === 0 ? -1 : 1;
-    const o = { mat: 'wood', name: 'Temporary brace (reuse offcuts)', group: 'temp', step: STEP.POSTS, stepTo: STEP.JOISTS, temp: true, ex: [0, 0, 0] };
-    b.member(V(cx + dx * 44, 0, cz), V(cx + dx * 4.5, 62, cz), { t: 1.5, d: 3.5 }, V(0, 0, 1), o);
-    b.member(V(cx, 0, cz + dz * 44), V(cx, 62, cz + dz * 3.5), { t: 1.5, d: 3.5 }, V(1, 0, 0), o);
+    const dz = po.zc < D / 2 ? -1 : 1;
+    const o = { mat: 'wood', name: 'Temporary brace (reuse offcuts)', group: 'temp', step: STEP.POSTS, stepTo: STEP.WALL_FRONT, temp: true, ex: [0, 0, 0] };
+    b.member(V(po.xc + dx * 48, 0, po.zc), V(po.xc + dx * 3.5, 66, po.zc), { t: 1.5, d: 3.5 }, V(0, 0, 1), o);
+    b.member(V(po.xc, 0, po.zc + dz * 48), V(po.xc, 66, po.zc + dz * 2.5), { t: 1.5, d: 3.5 }, V(1, 0, 0), o);
   }
 
-  // ---------------------------------------------------------------- beams
-  let bolts = 0;
-  for (const row of rows) {
-    const outward = row.k === 0 ? -1 : row.k === nRows - 1 ? 1 : 0;
-    row.beams.forEach(([za, zb], ply) => {
-      const segs = splitRange(0, W, row.xs, 192, ply === 1);
-      for (const [s, e] of segs) {
-        b.lumberBox('2x6', s, e, yBb, yBt, za, zb, { name: 'Floor beam ply', cat: 'structure', group: 'beams', step: STEP.BEAMS, ex: [0, 0.8 * EX, outward * 0.9 * EX] });
-      }
-    });
-    bolts += row.xs.length * 2;
+  // ---------------------------------------------------------------- formwork, plastic, rebar
+  const formRows = Math.max(1, Math.ceil((y0 + 0.5) / 5.5));
+  const fo = { cat: 'formwork', group: 'formwork', step: STEP.POSTS, stepTo: STEP.SLAB, name: 'Slab form board (2x6, reuse later)', ex: [0, 0, 0] };
+  for (let k = 0; k < formRows; k++) {
+    const ya = y0 - 5.5 * (k + 1);
+    const yb = y0 - 5.5 * k;
+    for (const [s, e] of splitRange(-1.5, W + 1.5, [], 192)) {
+      b.lumberBox('2x6', s, e, ya, yb, -1.5, 0, fo);
+      b.lumberBox('2x6', s, e, ya, yb, D, D + 1.5, fo);
+    }
+    for (const [s, e] of splitRange(0, D, [], 192)) {
+      b.lumberBox('2x6', -1.5, 0, ya, yb, s, e, fo);
+      b.lumberBox('2x6', W, W + 1.5, ya, yb, s, e, fo);
+    }
   }
-  // Shed roof beams (only when the roof is deep enough to need them).
-  if (roofBeams) {
-    for (const row of rows.slice(1, -1)) {
-      const yt = underside(row.zc);
-      row.beams.forEach(([za, zb], ply) => {
-        for (const [s, e] of splitRange(0, W, row.xs, 192, ply === 1)) {
-          b.lumberBox('2x6', s, e, yt - 5.5, yt, za, zb, { name: 'Roof beam ply', cat: 'structure', group: 'roof', step: STEP.ROOF_FRAME, ex: [0, 6 * EX, 0] });
-        }
-      });
-      bolts += row.xs.length * 2;
+  const stakeO = { ...fo, name: 'Form stake (2x4)' };
+  for (let x = 24; x < W; x += 48) {
+    b.lumberBox('2x4', x - 0.75, x + 0.75, -14, y0, -3, -1.5, stakeO);
+    b.lumberBox('2x4', x - 0.75, x + 0.75, -14, y0, D + 1.5, D + 3, stakeO);
+  }
+  for (let z = 24; z < D; z += 48) {
+    b.lumberBox('2x4', -3, -1.5, -14, y0, z - 0.75, z + 0.75, stakeO);
+    b.lumberBox('2x4', W + 1.5, W + 3, -14, y0, z - 0.75, z + 0.75, stakeO);
+  }
+  b.box(0.5, W - 0.5, y0 - slabCore - 0.12, y0 - slabCore - 0.02, 0.5, D - 0.5, { mat: 'plastic', name: '6-mil plastic under the slab', group: 'formwork', step: STEP.POSTS, stepTo: STEP.POSTS, ex: [0, 0, 0] });
+  const rebar = [];
+  const rebarY = edge ? y0 - 2 : y0 - P.slabT / 2;
+  const ro = { mat: 'rebar', group: 'formwork', step: STEP.POSTS, stepTo: STEP.POSTS, name: '1/2" rebar', ex: [0, 0, 0] };
+  const barPieces = (L) => {
+    const n = Math.max(1, Math.ceil((L - 12) / (240 - 12)));
+    const len = (L + 12 * (n - 1)) / n;
+    for (let i = 0; i < n; i++) rebar.push(len);
+  };
+  const sp = P.rebarSpacing;
+  for (let z = 3; z <= D - 3 + 0.01; z += sp) {
+    b.box(3, W - 3, rebarY, rebarY + 0.5, z - 0.25, z + 0.25, { ...ro, info: `${ftin(W - 6)} run` });
+    barPieces(W - 6);
+  }
+  for (let x = 3; x <= W - 3 + 0.01; x += sp) {
+    b.box(x - 0.25, x + 0.25, rebarY + 0.5, rebarY + 1, 3, D - 3, { ...ro, info: `${ftin(D - 6)} run` });
+    barPieces(D - 6);
+  }
+  if (edge) {
+    for (const yy of [yS0 + 3, y0 - 6]) {
+      b.box(6, W - 6, yy, yy + 0.5, 6, 6.5, ro); b.box(6, W - 6, yy, yy + 0.5, D - 6.5, D - 6, ro);
+      b.box(6, 6.5, yy, yy + 0.5, 6, D - 6, ro); b.box(W - 6.5, W - 6, yy, yy + 0.5, 6, D - 6, ro);
+      barPieces(W - 12); barPieces(W - 12); barPieces(D - 12); barPieces(D - 12);
     }
   }
 
-  // ---------------------------------------------------------------- joists
-  const tallPosts = posts.filter((po) => po.tall);
-  const joistOpt = { cat: 'framing', group: 'joists', step: STEP.JOISTS, ex: [0, 1.8 * EX, 0] };
-  const interiorZ = rows.slice(1, -1).map((r) => r.zc);
-  const midJoists = [];
-  for (let c = P.joistSpacing; c < W - 1.5 - 4; c += P.joistSpacing) {
-    let x = c;
-    for (const po of posts) {
-      if (!po.tall) continue;
-      if (po.row.perim && overlaps(x - 0.75, x + 0.75, po.x0, po.x1)) x = po.x1 + 0.75;
-    }
-    if (x + 0.75 > W - 1.5) continue;
-    midJoists.push(x);
-  }
-  let joistPieces = 0;
-  for (const x of midJoists) {
-    for (const [s, e] of splitRange(1.5, D - 1.5, interiorZ, 192)) {
-      b.lumberBox('2x6', x - 0.75, x + 0.75, yJb, yJt, s, e, { ...joistOpt, name: 'Floor joist' });
-      joistPieces++;
-    }
-  }
-  for (const [xa, xb, left] of [[0, 1.5, true], [W - 1.5, W, false]]) {
-    const holes = posts.filter((po) => po.end && po.xc < W / 2 === left && po.tall && !po.row.perim).map((po) => [po.z0, po.z1]);
-    for (const [s0, e0] of subtract(3, D - 3, holes)) {
-      for (const [s, e] of splitRange(s0, e0, interiorZ, 192)) {
-        b.lumberBox('2x6', xa, xb, yJb, yJt, s, e, { ...joistOpt, name: 'End joist' });
-        joistPieces++;
-      }
-    }
-  }
-  for (const [za, zb, k] of [[0, 1.5, 0], [D - 1.5, D, nRows - 1]]) {
-    const holes = posts.filter((po) => po.row.k === k).map((po) => [po.x0, po.x1]);
-    for (const [s0, e0] of subtract(0, W, holes)) {
-      for (const [s, e] of splitRange(s0, e0, [], 192)) {
-        b.lumberBox('2x6', s, e, yJb, yJt, za, zb, { ...joistOpt, name: 'Rim joist', ex: [0, 1.8 * EX, (k ? 1 : -1) * 0.5 * EX] });
-      }
-    }
-  }
-  let ties = (midJoists.length + 2) * nRows;
-
-  // ---------------------------------------------------------------- floor
-  const floorPieces = [];
-  const floorOpt = { mat: 'plyFloor', name: PLY[P.floorPly].name + ' floor sheet', group: 'floor', step: STEP.FLOOR, ex: [0, 2.8 * EX, 0] };
-  for (let r = 0, z = 0; z < D - 0.5; r++, z += 48) {
-    const z1 = Math.min(z + 48, D);
-    const off = r % 2 ? 48 : 0;
-    for (let x = -off; x < W - 0.5; x += 96) {
-      const xa = Math.max(0, x);
-      const xb = Math.min(W, x + 96);
-      if (xb - xa < 0.5) continue;
-      b.box(xa + 0.06, xb - 0.06, yJt, Hf, z + 0.06, z1 - 0.06, { ...floorOpt, info: `${ftin(xb - xa)} × ${ftin(z1 - z)}` });
-      floorPieces.push({ w: xb - xa, h: z1 - z });
-    }
+  // ---------------------------------------------------------------- slab
+  const slabName = edge ? 'Concrete slab (4") with thickened edge' : `Concrete slab, ${inch(P.slabT)} thick`;
+  const so = { mat: 'concrete', name: slabName, info: `${ftin(W)} × ${ftin(D)}, top ${inch(P.slabAbove)} above grade`, group: 'slab', step: STEP.SLAB, ex: [0, -1.5 * EX, 0] };
+  b.box(0, W, y0 - slabCore, y0, 0, D, so);
+  if (edge) {
+    const eo = { ...so, name: `Thickened slab edge, 12" wide × ${inch(P.slabT)} deep` };
+    b.box(0, W, yS0, y0 - 4, 0, 12, eo);
+    b.box(0, W, yS0, y0 - 4, D - 12, D, eo);
+    b.box(0, 12, yS0, y0 - 4, 12, D - 12, eo);
+    b.box(W - 12, W, yS0, y0 - 4, 12, D - 12, eo);
   }
 
   // ---------------------------------------------------------------- walls
-  const mkWall = (key, O, U, n, L, ua, ub, top, sideTop, step) => ({ key, O, U, n, L, ua, ub, top, sideTop, step, posts: [], openings: [] });
-  const walls = {
-    back: mkWall('back', V(W, y0, 0), V(-1, 0, 0), V(0, 0, -1), W, 0, W, () => topBack, () => topBack, STEP.WALL_BACK),
-    front: mkWall('front', V(0, y0, D), V(1, 0, 0), V(0, 0, 1), W, 0, W, () => topFront, () => topFront, STEP.WALL_FRONT),
-    left: mkWall('left', V(0, y0, 0), V(0, 0, 1), V(-1, 0, 0), D, 3.5, D - 3.5, (u) => endTop(u), (u) => rafterTop(u) - y0, STEP.WALL_ENDS),
-    right: mkWall('right', V(W, y0, D), V(0, 0, -1), V(1, 0, 0), D, 3.5, D - 3.5, (u) => endTop(D - u), (u) => rafterTop(D - u) - y0, STEP.WALL_ENDS),
-  };
-  const toW = (w, u, v, d) => w.O.clone().addScaledVector(w.U, u).addScaledVector(UP, v).addScaledVector(w.n, -d);
-  const wallBox = (w, u0, u1, v0, v1, d0, d1) => {
-    const a = toW(w, u0, v0, d0);
-    const c = toW(w, u1, v1, d1);
-    return [Math.min(a.x, c.x), Math.max(a.x, c.x), Math.min(a.y, c.y), Math.max(a.y, c.y), Math.min(a.z, c.z), Math.max(a.z, c.z)];
-  };
-  const wallEx = (w, out, layer) => [w.n.x * out * EX, layer * EX, w.n.z * out * EX];
-
-  for (const po of tallPosts) {
-    if (po.row.k === 0) walls.back.posts.push([W - po.x1, W - po.x0]);
-    else if (po.row.k === nRows - 1) walls.front.posts.push([po.x0, po.x1]);
-    if (!po.row.perim && po.end && po.xc < W / 2) walls.left.posts.push([po.z0, po.z1]);
-    if (!po.row.perim && po.end && po.xc > W / 2) walls.right.posts.push([D - po.z1, D - po.z0]);
-  }
-
-  // Openings ---------------------------------------------------------
-  const winRO = { w: P.windowW * 12 + 1, h: P.windowH * 12 + 1 };
-  let sill = P.sill;
-  if (sill + winRO.h + 5.5 > H - 4.5) {
-    sill = Math.max(12, H - 4.5 - 5.5 - winRO.h);
-    warnings.push(`Window sill lowered to ${inch(sill)} to fit under the wall plate.`);
-  }
-  const rowCenters = rows.map((r) => (r.k === 0 ? 1.5 : r.k === nRows - 1 ? D - 1.5 : r.zc));
-  const windows = [];
-  for (let k = 0; k < nRows - 1; k++) {
-    const zc = (rowCenters[k] + rowCenters[k + 1]) / 2;
-    const half = winRO.w / 2;
-    if (rowCenters[k + 1] - rowCenters[k] - 3 < winRO.w + 6) continue;
-    walls.left.openings.push({ type: 'window', u0: zc - half, u1: zc + half, v0: sill, v1: sill + winRO.h });
-    walls.right.openings.push({ type: 'window', u0: D - zc - half, u1: D - zc + half, v0: sill, v1: sill + winRO.h });
-  }
-  // Extra windows in the back wall of longer houses.
-  if (nx - 1 >= 3) {
-    for (let i = 1; i < nx - 1; i += 2) {
-      const xc = (xs[i] + xs[i + 1]) / 2;
-      if (xs[i + 1] - xs[i] - 5.5 < winRO.w + 6) continue;
-      walls.back.openings.push({ type: 'window', u0: W - xc - winRO.w / 2, u1: W - xc + winRO.w / 2, v0: sill, v1: sill + winRO.h });
-    }
-  }
-  walls.front.openings.push({ type: 'door', u0: doorC - doorRO.w / 2, u1: doorC + doorRO.w / 2, v0: 0, v1: doorRO.h });
-
   // Framing ------------------------------------------------------------
   const blockLevels = [];
   const nLev = Math.max(1, Math.round(H / 32) - 1);
   for (let j = 1; j <= nLev; j++) blockLevels.push((H * j) / (nLev + 1));
   let studCount = 0;
+  let anchors = 0;
   for (const w of Object.values(walls)) {
-    const fo = { cat: 'framing', group: 'wall', step: w.step, ex: wallEx(w, 0.6, 3.8) };
+    const fo2 = { cat: 'framing', group: 'wall', step: w.step, ex: wallEx(w, 0.6, 1.5) };
     const add = (name, size, u0, u1, v0, v1, d0, d1, extra = {}) => {
       const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, u0, u1, v0, v1, d0, d1);
-      return b.lumberBox(size, x0, x1, yy0, yy1, z0, z1, { ...fo, name, ...extra });
+      return b.lumberBox(size, x0, x1, yy0, yy1, z0, z1, { ...fo2, name, ...extra });
     };
-    const sloped = Math.abs(w.top(w.ua) - w.top(w.ub)) > 0.01;
     const doorHoles = w.openings.filter((o) => o.type === 'door').map((o) => [o.u0, o.u1]);
-    // bottom plate (between posts, not across the door)
     for (const [s0, e0] of subtract(w.ua, w.ub, [...w.posts, ...doorHoles])) {
-      for (const [s, e] of splitRange(s0, e0, [], 192)) add('Bottom plate', '2x4', s, e, 0, 1.5, 0, 3.5);
-    }
-    // double top plate
-    for (const layer of [0, 1]) {
-      if (!sloped) {
-        const vt = w.top(w.ua) - 1.5 * layer;
-        for (const [s, e] of splitRange(w.ua, w.ub, [], 192, layer === 1)) add(layer ? 'Top plate (lower)' : 'Top plate (upper)', '2x4', s, e, vt - 1.5, vt, 0, 3.5);
-      } else {
-        const off = 0.75 + 1.5 * layer;
-        const a = toW(w, w.ua, w.top(w.ua) - off / cos, 1.75);
-        const c = toW(w, w.ub, w.top(w.ub) - off / cos, 1.75);
-        b.member(a, c, '2x4', w.n, { ...fo, name: 'Raked top plate' });
+      for (const [s, e] of splitRange(s0, e0, [], 192)) {
+        add('Bottom plate (anchored to slab)', '2x4', s, e, 0, 1.5, 0, 3.5);
+        anchors += Math.max(2, Math.ceil((e - s) / 48) + 1);
       }
     }
-    // studs
-    const vertical = [...w.posts.map(([a, bb]) => [a, bb])];
+    for (const layer of [0, 1]) {
+      const vt = H - 1.5 * layer;
+      for (const [s, e] of splitRange(w.ua, w.ub, [], 192, layer === 1)) add(layer ? 'Top plate (lower)' : 'Top plate (upper)', '2x4', s, e, vt - 1.5, vt, 0, 3.5);
+    }
+    const vertical = [...w.posts.map(([a, c]) => [a, c])];
     const zones = w.openings.map((o) => [o.u0 - 3, o.u1 + 3]);
     const cands = new Set([w.ua + 0.75, w.ub - 0.75]);
     for (let c = 0; c <= w.L; c += P.studSpacing) if (c > w.ua + 3 && c < w.ub - 3) cands.add(c);
     for (const c of [...cands].sort((x, y) => x - y)) {
       const u0 = c - 0.75;
       const u1 = c + 0.75;
-      if (w.posts.some(([a, bb]) => overlaps(u0 - 1, u1 + 1, a, bb))) continue;
-      if (zones.some(([a, bb]) => overlaps(u0, u1, a, bb))) continue;
-      add('Stud', '2x4', u0, u1, 1.5, w.top(c) - 3, 0, 3.5);
+      if (w.posts.some(([a, c2]) => overlaps(u0 - 1, u1 + 1, a, c2))) continue;
+      if (zones.some(([a, c2]) => overlaps(u0, u1, a, c2))) continue;
+      add('Stud', '2x4', u0, u1, 1.5, H - 3, 0, 3.5);
       vertical.push([u0, u1]);
       studCount++;
     }
-    // openings
     for (const o of w.openings) {
       const { u0, u1, v0, v1 } = o;
-      add('King stud', '2x4', u0 - 3, u0 - 1.5, 1.5, w.top(u0) - 3, 0, 3.5);
-      add('King stud', '2x4', u1 + 1.5, u1 + 3, 1.5, w.top(u1) - 3, 0, 3.5);
+      add('King stud', '2x4', u0 - 3, u0 - 1.5, 1.5, H - 3, 0, 3.5);
+      add('King stud', '2x4', u1 + 1.5, u1 + 3, 1.5, H - 3, 0, 3.5);
       vertical.push([u0 - 3, u0 - 1.5], [u1 + 1.5, u1 + 3]);
       add('Trimmer stud', '2x4', u0 - 1.5, u0, 1.5, v1, 0, 3.5);
       add('Trimmer stud', '2x4', u1, u1 + 1.5, 1.5, v1, 0, 3.5);
@@ -518,13 +512,12 @@ export function design(P) {
       for (let c = 0; c <= w.L; c += P.studSpacing) if (c > u0 + 1 && c < u1 - 1) grid.push(c);
       if (!grid.length) grid.push((u0 + u1) / 2);
       for (const c of grid) {
-        const tv = w.top(c) - 3;
+        const tv = H - 3;
         if (tv - (v1 + 5.5) > 2) add('Cripple stud', '2x4', c - 0.75, c + 0.75, v1 + 5.5, tv, 0, 3.5);
         if (o.type === 'window' && v0 - 1.5 - 1.5 > 2) add('Cripple stud', '2x4', c - 0.75, c + 0.75, 1.5, v0 - 1.5, 0, 3.5);
       }
       if (o.type === 'window') add('Rough sill', '2x4', u0, u1, v0 - 1.5, v0, 0, 3.5);
     }
-    // blocking rows (nailers for vertical corrugated siding)
     vertical.sort((x, y) => x[0] - y[0]);
     for (const lv of blockLevels) {
       for (let i = 0; i + 1 < vertical.length; i++) {
@@ -536,75 +529,54 @@ export function design(P) {
         add('Blocking / girt', '2x4', s, e, lv - 0.75, lv + 0.75, 0, 3.5);
       }
     }
-    // gable-end studs above the plate
-    if (!shed && (w.key === 'left' || w.key === 'right')) {
+    if (w.key === 'left' || w.key === 'right') {
       for (let c = P.studSpacing; c < w.L; c += P.studSpacing) {
         if (c < 6 || c > w.L - 6) continue;
         const z = w.key === 'left' ? c : D - c;
         const hgt = underside(z) - y0 - H;
         if (hgt < 3) continue;
         const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, c - 0.75, c + 0.75, H, H + hgt, 0, 3.5);
-        b.lumberBox('2x4', x0, x1, yy0, yy1, z0, z1, { cat: 'framing', name: 'Gable stud', group: 'roof', step: STEP.ROOF_FRAME, ex: wallEx(w, 0.6, 6) });
+        b.lumberBox('2x4', x0, x1, yy0, yy1, z0, z1, { cat: 'framing', name: 'Gable stud', group: 'roof', step: STEP.ROOF_FRAME, ex: wallEx(w, 0.6, 3.5) });
       }
     }
   }
-  ties += tallPosts.filter((po) => po.row.perim || po.end).length; // post-to-plate straps
+  let ties = posts.length; // post-to-plate straps
 
   // ---------------------------------------------------------------- roof framing
   const rafterXs = [0.75];
   for (let c = 0.75 + P.rafterSpacing; c < W - 0.75 - 6; c += P.rafterSpacing) rafterXs.push(c);
   rafterXs.push(W - 0.75);
-  const roofEx = [0, 6 * EX, 0];
+  const roofEx = [0, 3.5 * EX, 0];
   const rafterOpt = { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: roofEx, name: `Rafter (${rafterSize})` };
   const nBack = V(0, cos, -sin);
   const nFront = V(0, cos, sin);
-  if (!shed) {
-    for (const x of rafterXs) {
-      for (const [z0, z1, nrm] of [[-E, D / 2 - 0.75, nBack], [D + E, D / 2 + 0.75, nFront]]) {
-        const a = V(x, underside(z0), z0).addScaledVector(nrm, rd / 2);
-        const c = V(x, underside(z1), z1).addScaledVector(nrm, rd / 2);
-        b.member(a, c, rafterSize, UP, rafterOpt);
-      }
+  for (const x of rafterXs) {
+    for (const [z0, z1, nrm] of [[-E, D / 2 - 0.75, nBack], [D + E, D / 2 + 0.75, nFront]]) {
+      const a = V(x, underside(z0), z0).addScaledVector(nrm, rd / 2);
+      const c = V(x, underside(z1), z1).addScaledVector(nrm, rd / 2);
+      b.member(a, c, rafterSize, UP, rafterOpt);
     }
-    const ridgeTop = rafterTop(D / 2 - 0.75);
-    for (const [s, e] of splitRange(0, W, rafterXs, 192)) {
-      b.lumberBox('2x6', s, e, ridgeTop - 5.5, ridgeTop, D / 2 - 0.75, D / 2 + 0.75, { ...rafterOpt, name: 'Ridge board' });
-    }
-    // ceiling / collar ties on every other rafter pair
-    rafterXs.forEach((x, i) => {
-      if (i === 0 || i === rafterXs.length - 1 || i % 2 === 0) return;
-      for (const [s, e] of splitRange(0, D, [D / 2], 192)) {
-        b.lumberBox('2x4', x + 0.75, x + 2.25, yTop, yTop + 3.5, s, e, { ...rafterOpt, name: 'Ceiling tie' });
-      }
-    });
-    ties += rafterXs.length * 2;
-  } else {
-    const splitZ = roofBeams ? rows.slice(1, -1).map((r) => r.zc) : [];
-    for (const x of rafterXs) {
-      const zs = [-E, ...splitZ.filter((z) => z > -E && z < D + E), D + E];
-      // pick splices so pieces fit 16 ft
-      const segs = splitRange(-E, D + E, splitZ, 192 * cos);
-      for (const [s, e] of segs) {
-        const a = V(x, underside(s), s).addScaledVector(nBack, rd / 2);
-        const c = V(x, underside(e), e).addScaledVector(nBack, rd / 2);
-        b.member(a, c, rafterSize, UP, rafterOpt);
-      }
-      void zs;
-    }
-    ties += rafterXs.length * (2 + (roofBeams ? nRows - 2 : 0));
   }
+  const ridgeTop = rafterTop(D / 2 - 0.75);
+  for (const [s, e] of splitRange(0, W, rafterXs, 192)) {
+    b.lumberBox('2x6', s, e, ridgeTop - 5.5, ridgeTop, D / 2 - 0.75, D / 2 + 0.75, { ...rafterOpt, name: 'Ridge board' });
+  }
+  rafterXs.forEach((x, i) => {
+    if (i === 0 || i === rafterXs.length - 1 || i % 2 === 0) return;
+    for (const [s, e] of splitRange(0, D, [D / 2 + 12], 192)) {
+      b.lumberBox('2x4', x + 0.75, x + 2.25, yTop, yTop + 3.5, s, e, { ...rafterOpt, name: 'Ceiling tie' });
+    }
+  });
+  ties += rafterXs.length * 2;
 
-  // purlins
-  const slopes = shed
-    ? [{ key: 'shed', zt: -E, dir: 1, top: (D + 2 * E) / cos, nrm: nBack }]
-    : [
-      { key: 'back', zt: -E, dir: 1, top: (D / 2 + E) / cos, nrm: nBack },
-      { key: 'front', zt: D + E, dir: -1, top: (D / 2 + E) / cos, nrm: nFront },
-    ];
+  const slopes = [
+    { key: 'back', zt: -E, dir: 1, top: (D / 2 + E) / cos, nrm: nBack },
+    { key: 'front', zt: D + E, dir: -1, top: (D / 2 + E) / cos, nrm: nFront },
+  ];
   let purlinRows = 0;
   for (const sl of slopes) {
     const s0 = 1.75;
-    const s1 = sl.top - (shed ? 1.75 : 2.5);
+    const s1 = sl.top - 2.5;
     const n = Math.ceil((s1 - s0) / P.purlinSpacing) + 1;
     sl.purlins = n;
     purlinRows += n;
@@ -616,23 +588,14 @@ export function design(P) {
       for (const [xa, xb] of splitRange(-R, W + R, rafterXs, 192)) {
         const a = V(xa, y, z).addScaledVector(sl.nrm, 0.75);
         const c = V(xb, y, z).addScaledVector(sl.nrm, 0.75);
-        b.member(a, c, '2x4', upDir, { cat: 'framing', group: 'purlins', step: STEP.PURLINS, ex: [0, 7.5 * EX, 0], name: 'Purlin (2x4 flat)', flat: true });
+        b.member(a, c, '2x4', upDir, { cat: 'framing', group: 'purlins', step: STEP.PURLINS, ex: [0, 5 * EX, 0], name: 'Purlin (2x4 flat)', flat: true });
       }
     }
-    // fascia at the eave
     const zf = sl.zt;
     const yf = rafterTop(zf);
     for (const [xa, xb] of splitRange(-R, W + R, rafterXs, 192)) {
       const za = sl.dir > 0 ? zf - 0.75 : zf;
-      b.lumberBox('1x6', xa, xb, yf - 5.5, yf, za, za + 0.75, { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: [0, 6 * EX, -sl.dir * 0.4 * EX], name: 'Fascia' });
-    }
-  }
-  if (shed) {
-    // fascia at the high (front) eave too
-    const zf = D + E;
-    const yf = rafterTop(zf);
-    for (const [xa, xb] of splitRange(-R, W + R, rafterXs, 192)) {
-      b.lumberBox('1x6', xa, xb, yf - 5.5, yf, zf, zf + 0.75, { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: [0, 6 * EX, 0.4 * EX], name: 'Fascia' });
+      b.lumberBox('1x6', xa, xb, yf - 5.5, yf, za, za + 0.75, { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: [0, 3.5 * EX, -sl.dir * 0.4 * EX], name: 'Fascia' });
     }
   }
 
@@ -642,17 +605,15 @@ export function design(P) {
   const tinMat = clad === 'pvc' ? 'pvc' : 'tin';
   const tinName = clad === 'pvc' ? 'PVC tinroof sheet' : 'Metal tinroof sheet';
   let roofFasteners = 0;
-  let roofArea = 0;
   const nCols = Math.ceil((W + 2 * R - (tinW - P.tinCover)) / P.tinCover);
   for (const sl of slopes) {
-    const zs = sl.zt - sl.dir * 2; // 2" past the fascia
-    const zEnd = shed ? D + E + 2 : D / 2 - sl.dir * 1;
+    const zs = sl.zt - sl.dir * 2;
+    const zEnd = D / 2 - sl.dir * 1;
     const Ls = Math.abs(zEnd - zs) / cos;
     const yAxis = V(0, sin, sl.dir * cos);
     const zAxis = sl.nrm.clone();
     const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis);
     const run = sheetRun(Ls);
-    roofArea += (W + 2 * R) * Ls;
     for (let i = 0; i < nCols; i++) {
       const xi = -R + i * P.tinCover;
       const wi = Math.min(tinW, W + R - xi);
@@ -662,30 +623,27 @@ export function design(P) {
         const o = V(xAxis.x > 0 ? xi : xi + wi, roofTop(z), z).addScaledVector(zAxis, 0.12 + (i % 2) * 0.08 + j * 0.12);
         b.sheet(o, xAxis, yAxis, zAxis, { w: wi, h: pc.len, corr: CORR }, {
           mat: tinMat, name: tinName, info: `cut length ${ftin(pc.len)}`, group: 'roofing', step: STEP.ROOFING,
-          ex: [zAxis.x * EX, 9.5 * EX + zAxis.y * EX, zAxis.z * EX],
+          ex: [zAxis.x * EX, 7 * EX + zAxis.y * EX, zAxis.z * EX],
         });
         tinPieces.push({ stock: pc.stock, len: pc.len, use: 'roof' });
         roofFasteners += Math.ceil(sl.purlins * (pc.len / Ls)) * 6;
       });
     }
   }
-  let ridgePieces = 0;
-  if (!shed) {
-    const ridgeY = roofTop(D / 2);
-    for (const sl of slopes) {
-      const yAxis = V(0, sin, sl.dir * cos);
-      const zAxis = sl.nrm.clone();
-      const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis);
-      const o = V(xAxis.x > 0 ? -R : W + R, ridgeY, D / 2).addScaledVector(yAxis, -7).addScaledVector(zAxis, 0.9);
-      b.sheet(o, xAxis, yAxis, zAxis, { w: W + 2 * R, h: 7, corr: null }, { mat: tinMat, name: 'Ridge cap', group: 'roofing', step: STEP.ROOFING, ex: [0, 11 * EX, 0] });
-    }
-    ridgePieces = Math.ceil((W + 2 * R) / (120 - 6));
-    roofFasteners += ridgePieces * 12;
+  const ridgeY = roofTop(D / 2);
+  for (const sl of slopes) {
+    const yAxis = V(0, sin, sl.dir * cos);
+    const zAxis = sl.nrm.clone();
+    const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis);
+    const o = V(xAxis.x > 0 ? -R : W + R, ridgeY, D / 2).addScaledVector(yAxis, -7).addScaledVector(zAxis, 0.9);
+    b.sheet(o, xAxis, yAxis, zAxis, { w: W + 2 * R, h: 7, corr: null }, { mat: tinMat, name: 'Ridge cap', group: 'roofing', step: STEP.ROOFING, ex: [0, 8.5 * EX, 0] });
   }
+  const ridgePieces = Math.ceil((W + 2 * R) / (120 - 6));
+  roofFasteners += ridgePieces * 12;
 
   // ---------------------------------------------------------------- siding
   let sidingFasteners = 0;
-  const vb = yJb - 1 - y0;
+  const vb = -1.5; // laps 1-1/2" over the slab edge
   for (const w of Object.values(walls)) {
     const nc = Math.ceil((w.L - (tinW - P.tinCover)) / P.tinCover);
     for (let i = 0; i < nc; i++) {
@@ -701,40 +659,39 @@ export function design(P) {
         const profile = (x) => w.sideTop(ui + x) - base;
         const o = toW(w, ui, base, -(0.15 + (i % 2) * 0.08 + j * 0.12));
         b.sheet(o, w.U, UP, w.n, { w: wi, h: pc.len, corr: CORR, holes, profile }, {
-          mat: tinMat, name: tinName + ' (siding)', info: `cut length ${ftin(pc.len)}`, group: 'siding', step: STEP.SIDING, ex: wallEx(w, 2.2, 3.8),
+          mat: tinMat, name: tinName + ' (siding)', info: `cut length ${ftin(pc.len)}`, group: 'siding', step: STEP.SIDING, ex: wallEx(w, 2.2, 1.5),
         });
         tinPieces.push({ stock: pc.stock, len: pc.len, use: 'siding' });
-        sidingFasteners += (blockLevels.length + 3) * 5 * (pc.len / Lc);
+        sidingFasteners += (blockLevels.length + 2) * 5 * (pc.len / Lc);
       });
     }
   }
-  // corner boards over the siding
   const cb = { cat: 'framing', group: 'trim', step: STEP.SIDING, name: 'Corner trim (1x4)' };
-  const cbBot = yJb - 1;
-  const cbTopB = y0 + topBack;
-  const cbTopF = y0 + topFront;
+  const cbBot = y0 + vb;
+  const cbTop = yTop;
   const t0 = 0.85;
-  b.lumberBox('1x4', 0, 3.5, cbBot, cbTopF, D + t0, D + t0 + 0.75, { ...cb, ex: [0, 3.8 * EX, 2.5 * EX] });
-  b.lumberBox('1x4', W - 3.5, W, cbBot, cbTopF, D + t0, D + t0 + 0.75, { ...cb, ex: [0, 3.8 * EX, 2.5 * EX] });
-  b.lumberBox('1x4', 0, 3.5, cbBot, cbTopB, -t0 - 0.75, -t0, { ...cb, ex: [0, 3.8 * EX, -2.5 * EX] });
-  b.lumberBox('1x4', W - 3.5, W, cbBot, cbTopB, -t0 - 0.75, -t0, { ...cb, ex: [0, 3.8 * EX, -2.5 * EX] });
-  b.lumberBox('1x4', -t0 - 0.75, -t0, cbBot, cbTopF, D - 3.5, D, { ...cb, ex: [-2.5 * EX, 3.8 * EX, 0] });
-  b.lumberBox('1x4', -t0 - 0.75, -t0, cbBot, cbTopB, 0, 3.5, { ...cb, ex: [-2.5 * EX, 3.8 * EX, 0] });
-  b.lumberBox('1x4', W + t0, W + t0 + 0.75, cbBot, cbTopF, D - 3.5, D, { ...cb, ex: [2.5 * EX, 3.8 * EX, 0] });
-  b.lumberBox('1x4', W + t0, W + t0 + 0.75, cbBot, cbTopB, 0, 3.5, { ...cb, ex: [2.5 * EX, 3.8 * EX, 0] });
+  b.lumberBox('1x4', 0, 3.5, cbBot, cbTop, D + t0, D + t0 + 0.75, { ...cb, ex: [0, 1.5 * EX, 2.5 * EX] });
+  b.lumberBox('1x4', W - 3.5, W, cbBot, cbTop, D + t0, D + t0 + 0.75, { ...cb, ex: [0, 1.5 * EX, 2.5 * EX] });
+  b.lumberBox('1x4', 0, 3.5, cbBot, cbTop, -t0 - 0.75, -t0, { ...cb, ex: [0, 1.5 * EX, -2.5 * EX] });
+  b.lumberBox('1x4', W - 3.5, W, cbBot, cbTop, -t0 - 0.75, -t0, { ...cb, ex: [0, 1.5 * EX, -2.5 * EX] });
+  b.lumberBox('1x4', -t0 - 0.75, -t0, cbBot, cbTop, D - 3.5, D, { ...cb, ex: [-2.5 * EX, 1.5 * EX, 0] });
+  b.lumberBox('1x4', -t0 - 0.75, -t0, cbBot, cbTop, 0, 3.5, { ...cb, ex: [-2.5 * EX, 1.5 * EX, 0] });
+  b.lumberBox('1x4', W + t0, W + t0 + 0.75, cbBot, cbTop, D - 3.5, D, { ...cb, ex: [2.5 * EX, 1.5 * EX, 0] });
+  b.lumberBox('1x4', W + t0, W + t0 + 0.75, cbBot, cbTop, 0, 3.5, { ...cb, ex: [2.5 * EX, 1.5 * EX, 0] });
 
-  // ---------------------------------------------------------------- windows & door
+  // ---------------------------------------------------------------- windows & doors
   const winList = [];
+  let nDoors = 0;
   const trimD = [-(t0 + 0.75), -t0];
   for (const w of Object.values(walls)) {
     for (const o of w.openings) {
       const { u0, u1, v0, v1 } = o;
       const isDoor = o.type === 'door';
       const step = isDoor ? STEP.DOOR : STEP.WINDOWS;
-      const exOut = wallEx(w, 3.2, 3.8);
-      const trimO = { cat: 'framing', group: 'trim', step, ex: wallEx(w, 2.8, 3.8), name: isDoor ? 'Door casing (1x4)' : 'Window casing (1x4)' };
-      const addT = (u_0, u_1, v_0, v_1) => {
-        const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, u_0, u_1, v_0, v_1, trimD[0], trimD[1]);
+      const exOut = wallEx(w, 3.2, 1.5);
+      const trimO = { cat: 'framing', group: 'trim', step, ex: wallEx(w, 2.8, 1.5), name: isDoor ? 'Door casing (1x4)' : 'Window casing (1x4)' };
+      const addT = (a, c, va, vc) => {
+        const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, a, c, va, vc, trimD[0], trimD[1]);
         b.lumberBox('1x4', x0, x1, yy0, yy1, z0, z1, trimO);
       };
       addT(u0 - 3.5, u1 + 3.5, v1, v1 + 3.5);
@@ -759,16 +716,15 @@ export function design(P) {
         }
         winList.push({ frame: P.windowH, blades: nBl, bladeLen: P.windowW, wall: w.key });
       } else {
-        // jambs
+        nDoors++;
         const jo = { cat: 'framing', group: 'door', step, ex: exOut, name: 'Door jamb (1x6)' };
-        const addJ = (u_0, u_1, v_0, v_1) => {
-          const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, u_0, u_1, v_0, v_1, -0.75, 3.75);
+        const addJ = (a, c, va, vc) => {
+          const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, a, c, va, vc, -0.75, 3.75);
           b.lumberBox('1x6', x0, x1, yy0, yy1, z0, z1, jo);
         };
         addJ(u0, u0 + 0.75, 0, v1);
         addJ(u1 - 0.75, u1, 0, v1);
         addJ(u0 + 0.75, u1 - 0.75, v1 - 0.75, v1);
-        // leaf: vertical 1x6 boards with a Z-brace of 1x4
         const lu0 = u0 + 1;
         const lu1 = u1 - 1;
         const lv0 = 0.5;
@@ -789,7 +745,7 @@ export function design(P) {
           b.box(x0, x1, yy0, yy1, z0, z1, { mat: 'steel', group: 'door', step, ex: exOut, name: 'Galvanised T-hinge' });
         }
         const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, lu1 - 4, lu1 + 1.2, 40, 41.5, 0.0, 0.25);
-        b.box(x0, x1, yy0, yy1, z0, z1, { mat: 'steel', group: 'door', step, ex: exOut, name: 'Hasp & padlock' });
+        b.box(x0, x1, yy0, yy1, z0, z1, { mat: 'steel', group: 'door', step, ex: exOut, name: 'Hasp' });
       }
     }
   }
@@ -797,96 +753,45 @@ export function design(P) {
   // ---------------------------------------------------------------- interior plywood
   const wallPlyPieces = [];
   for (const w of Object.values(walls)) {
-    const ua = w.key === 'front' || w.key === 'back' ? 3.5 : 3.5;
-    const ub = w.key === 'front' || w.key === 'back' ? w.L - 3.5 : w.L - 3.5;
-    const isGableEnd = !shed && (w.key === 'left' || w.key === 'right');
-    const topAt = (u) => (isGableEnd ? H : w.top(u));
+    const ua = 3.5;
+    const ub = w.L - 3.5;
     for (let u = ua; u < ub - 0.5; u += 48) {
       const cw = Math.min(48, ub - u);
-      const hmax = Math.max(topAt(u), topAt(u + cw));
-      for (let v = 0; v < hmax - 0.5; v += 96) {
-        const rh = Math.min(96, hmax - v);
+      for (let v = 0; v < H - 0.5; v += 96) {
+        const rh = Math.min(96, H - v);
         const holes = w.openings.map((o) => ({ x0: o.u0 - u, x1: o.u1 - u, y0: o.v0 - v, y1: o.v1 - v }));
-        const profile = (x) => topAt(u + x) - v;
         const o = toW(w, u, v, 3.62);
-        b.sheet(o, w.U, UP, w.n, { w: cw - 0.06, h: rh, corr: null, holes, profile }, {
-          mat: 'plyWall', name: PLY[P.wallPly].name + ' wall sheet', info: `${ftin(cw)} × ${ftin(rh)}`, group: 'interior', step: STEP.INTERIOR, ex: wallEx(w, -0.6, 3.8),
+        b.sheet(o, w.U, UP, w.n, { w: cw - 0.06, h: rh, corr: null, holes }, {
+          mat: 'plyWall', name: PLY[P.wallPly].name + ' wall sheet', info: `${ftin(cw)} × ${ftin(rh)}`, group: 'interior', step: STEP.INTERIOR, ex: wallEx(w, -0.6, 1.5),
         });
         wallPlyPieces.push({ w: cw, h: rh });
       }
     }
   }
 
-  // ---------------------------------------------------------------- stairs
-  const SW = P.stairW;
-  const nR = Math.ceil(Hf / 7.5);
-  const r = Hf / nR;
-  const nT = nR - 1;
-  const g = 10.5;
-  const Dw = D + 1.2;
-  const xd = doorC;
-  const alpha = Math.atan(r / g);
-  const ca = Math.cos(alpha);
-  const stairEx = [0, 1 * EX, 2.5 * EX];
-  const so = { cat: 'framing', group: 'stairs', step: STEP.STAIRS, ex: stairEx };
-  const yNT = nT * r;
-  const T = (z) => yNT + 1.3 - (z - (Dw + 5.5)) * (r / g);
-  const N = (z) => T(z) - 1.3 + 5.5 * (r / g);
-  const zS = Dw + 0.2;
-  const zE = Dw + 5.5 + ((yNT + 1.3 - 5.5 / ca) * g) / r;
-  const stringerXs = [xd - SW / 2 - 0.75, xd + SW / 2 + 0.75];
-  for (const sx of stringerXs) {
-    const C = (z) => T(z) - 2.75 / ca;
-    b.member(V(sx, C(zS), zS), V(sx, C(zE), zE), '2x6', UP, { ...so, name: 'Stair stringer (2x6)' });
-  }
-  for (let i = 1; i <= nT; i++) {
-    const yi = i * r;
-    const zb = Dw + (nT - i) * g;
-    for (const [za, zc] of [[zb, zb + 5.5], [zb + 5.5, zb + 11]]) {
-      b.lumberBox('2x6', xd - SW / 2, xd + SW / 2, yi - 1.5, yi, za + 0.06, zc - 0.06, { ...so, name: 'Stair tread (2x6)' });
-    }
-    for (const [xa, xb] of [[xd - SW / 2, xd - SW / 2 + 1.5], [xd + SW / 2 - 1.5, xd + SW / 2]]) {
-      b.lumberBox('2x4', xa, xb, yi - 5, yi - 1.5, zb + 3, zb + 8, { ...so, name: 'Tread cleat (2x4)' });
-    }
-  }
-  const blocks = 2;
-  for (const sx of stringerXs) {
-    b.box(sx - 3.8, sx + 3.8, -7.6, 0.4, zE - 12, zE + 3.6, { mat: 'block', name: 'Hollow block footing (concrete-filled)', group: 'stairs', step: STEP.STAIRS, ex: [0, 0, 2.5 * EX] });
-  }
-  // railings
-  const zTop = Dw + 2.75;
-  const zBot = zE - 8;
-  for (const side of [-1, 1]) {
-    const xo = side < 0 ? xd - SW / 2 - 1.5 : xd + SW / 2 + 1.5; // outer face of stringer
-    const px0 = side < 0 ? xo - 1.5 : xo;
-    const px1 = side < 0 ? xo : xo + 1.5;
-    const pc = (px0 + px1) / 2;
-    const railY = (z) => N(z) + 34;
-    b.lumberBox('2x4', px0, px1, T(zTop) - 5.5 / ca - 1, railY(zTop), zTop - 1.75, zTop + 1.75, { ...so, name: 'Railing post (2x4)' });
-    b.lumberBox('2x4', px0, px1, 0, railY(zBot), zBot - 1.75, zBot + 1.75, { ...so, name: 'Railing post (2x4)' });
-    b.member(V(pc, railY(zTop - 1.75) + 0.75, zTop - 1.75), V(pc, railY(zBot + 4) + 0.75, zBot + 4), '2x4', V(1, 0, 0), { ...so, name: 'Handrail (2x4 flat)' });
-    const mx = side < 0 ? px0 - 0.375 : px1 + 0.375;
-    b.member(V(mx, railY(zTop) - 17, zTop - 1.75), V(mx, railY(zBot) - 17, zBot + 1.75), '1x4', UP, { ...so, name: 'Mid rail (1x4)' });
-  }
-
   // ---------------------------------------------------------------- quantities
-  // Concrete volume: hole incl. 4" below the post + 2" collar above grade.
-  const rr = P.holeDia / 2;
-  const perPost = Math.PI * rr * rr * (P.embed + 6) - 3 * 5.5 * (P.embed + 2);
-  const concreteFt3 = (perPost * posts.length) / 1728 + 0.5; // + block fill / mortar
+  const postArea = 3 * 5.5;
+  let holeVol = 0;
+  for (let i = 0; i < posts.length; i++) {
+    const depth = yS0 - (bottom - 4);
+    if (depth > 0) holeVol += Math.PI * r * r * depth - postArea * Math.max(0, yS0 - bottom);
+  }
+  const slabVol = edge ? W * D * 4 + (2 * (W + D) * 12 - 4 * 144) * (P.slabT - 4) : W * D * P.slabT;
+  const postInSlab = posts.length * postArea * (edge ? P.slabT : P.slabT);
+  const concreteFt3 = (slabVol + holeVol - postInSlab) / 1728;
   const cementNet = concreteFt3 / BAG_YIELD_FT3;
+  const plasticFt2 = ((W + 12) * (D + 12)) / 144;
 
-  // fasteners
   let n16 = 0;
   for (const l of b.lumber) {
-    if (l.cat === 'structure' && l.label.startsWith('Post')) n16 += Math.ceil(l.len / 12);
+    if (l.cat === 'formwork') n16 += 4;
+    else if (l.cat === 'structure') n16 += Math.ceil(l.len / 12);
     else if (['1x4', '1x6', '1x8', '1x2', '1x3'].includes(l.size)) continue;
     else n16 += 4 + Math.floor(l.len / 24);
   }
   n16 += purlinRows * rafterXs.length * 2;
-  let n8 = floorPieces.length * 70;
+  let n8 = 0;
   for (const l of b.lumber) if (['1x4', '1x6', '1x8', '1x2', '1x3'].includes(l.size)) n8 += 4 + Math.floor(l.len / 12) * 2;
-  n8 += nT * 2 * 8;
   const nPanel = wallPlyPieces.length * 50;
   const roofFast = Math.ceil(roofFasteners + sidingFasteners);
 
@@ -894,64 +799,60 @@ export function design(P) {
   const nPosts = posts.length;
   const diag = Math.hypot(W, D);
   const floorArea = (W * D) / 144;
-  const roofAreaFt2 = roofArea / 144;
   const roofPlanFt2 = ((W + 2 * R) * (D + 2 * E)) / 144;
   const nWin = winList.length;
   const rainGal = roofPlanFt2 * 0.623;
+  const bagsR = Math.ceil(cementNet);
+  const doorDesc = [P.doorsFront && `${P.doorsFront} in the front wall`, P.doorsBack && `${P.doorsBack} in the back wall`, P.doorsSide && `${P.doorsSide} in each end wall`].filter(Boolean).join(', ');
   const steps = [
-    { title: 'Bare site', text: `Pick the highest, best-drained spot available and clear it of debris and roots. The building footprint is ${ftin(W)} × ${ftin(D)} (${num(floorArea)} sq ft of floor), plus about ${ftin(nT * g + 12)} in front for the stairs. Orient the long walls so the two louvre windows face the prevailing trade winds for cross-ventilation.` },
-    { title: 'Lay out & square the footprint', text: `Drive stakes and nail batter boards about 2' outside each corner, then stretch string lines along the outside faces of the building at ${ftin(W)} and ${ftin(D)}. Square the layout by measuring both diagonals — they must both be ${ftin(diag)}. Mark the ${nPosts} post centres (${nRows} beam lines; the front line has an extra pair of posts framing the door).` },
-    { title: 'Dig post holes', text: `Dig ${nPosts} holes, ${inch(P.holeDia)} in diameter and ${ftin(P.embed + 4)} deep (the post sits on 4" of concrete). Keep the string lines up so each hole stays centred on its mark.` },
-    { title: 'Set posts & pour footings', text: `Each post is two 2x6 plies nailed together (every 12", staggered) — the shop has no 4x4s, and laminated posts are straighter and stronger. Wrap the bottom 16" of every post in bitumen or heavy plastic. Pour 4" of concrete, set the post, plumb it in both directions with temporary braces, and fill the hole, crowning the concrete 2" above grade so water runs away from the wood. ${posts.filter((x) => x.tall).length} posts run full height to the wall plate; ${posts.filter((x) => !x.tall).length} stop under the floor. Mix about ${num(cementNet, 1)} bags of cement (1 : 2 : 3 cement : sand : gravel/crushed coral). Rinse beach sand with fresh water first. Keep the concrete damp and let it cure at least 3 days before loading.` },
-    { title: 'Bolt the floor beams', text: `Snap a level line on every post at ${ftin(yBb)} above grade (bottom of beam). Each beam is two 2x6 plies bolted to the posts with two 1/2" galvanised bolts per post (${bolts} bolts in total). Beam lines: ${nRows}; splices only over a post.` },
-    { title: 'Floor joists & rim', text: `Set ${midJoists.length + 2} 2x6 joists at ${inch(P.joistSpacing)} on centre across the beams, with rim joists across the ends nailed into the posts. Fit a hurricane tie wherever a joist crosses a beam. Check the frame is square (diagonals ${ftin(diag)}) and level before sheathing.` },
-    { title: 'Floor sheathing', text: `Glue (if available) and nail ${floorPieces.length} pieces of ${PLY[P.floorPly].name} with the long edge across the joists and the joints staggered. Use 8d galvanised nails every 6" at edges and 12" in the field. Notch around posts.` },
-    { title: 'Stairs & railing', text: `Build the stairs now so the crew has safe access. ${nR} risers of ${inch(r)} and ${nT} treads, ${inch(g)} going, ${ftin(SW)} wide. Two 2x6 stringers sit on concrete-filled hollow blocks and bolt to the rim; each tread is two 2x6s on 2x4 cleats. Handrails on both sides at 34" above the nosing.` },
-    { title: 'Frame the back wall', text: `Frame the back wall flat on the deck and tilt it up between the posts: 2x4 bottom plate, studs at ${inch(P.studSpacing)} on centre, and ${blockLevels.length} rows of flat blocking — the vertical corrugated siding is nailed to these. Nail the studs and plates into the posts.` },
-    { title: 'Frame the front wall & door opening', text: `Frame the front wall with a ${ftin(doorRO.w)} × ${ftin(doorRO.h)} rough opening for the ${inch(P.doorW)} door, centred between two posts, with king and trimmer studs each side and a doubled 2x6 header. The bottom plate is cut out at the door.` },
-    { title: 'Frame the end walls & windows', text: `Frame both end walls with rough openings of ${ftin(winRO.w)} × ${ftin(winRO.h)} for the louvre windows, sill at ${ftin(sill)} above the floor${nWin > 2 ? ` (${nWin} windows in total — larger houses get an extra window per bay)` : ''}. Add the double top plate, lapping the corners, and strap every post to the plate. Brace the walls plumb.` },
-    { title: 'Roof framing', text: shed ? `Single-slope (shed) roof at ${P.pitch}:12. The front wall is ${ftin(topFront - topBack)} taller than the back. Set ${rafterXs.length} ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre with ${inch(E)} eave overhangs, each tied to both plates with a hurricane tie.` : `Gable roof at ${P.pitch}:12. Raise the 2x6 ridge board on temporary props, then set ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre with ${inch(E)} eave overhangs. Tie every rafter to the plate with a hurricane tie and add ceiling ties on alternate pairs to stop the walls spreading. Fill the gable ends with studs. Nail 1x6 fascia to the rafter tails.` },
-    { title: 'Purlins', text: `Nail 2x4 purlins flat across the rafters, ${slopes.map((s) => s.purlins).join(' + ')} rows at no more than ${inch(P.purlinSpacing)} apart, overhanging the gable ends by ${inch(R)}. The corrugated sheets fasten to these.` },
-    { title: 'Roofing', text: `Lay ${tinPieces.filter((t) => t.use === 'roof').length} pieces of ${clad === 'pvc' ? 'PVC' : 'galvanised metal'} sheet, starting at the end away from the prevailing wind so the side laps face downwind. Lap one corrugation at the sides and ${inch(LAP)} at any end joints. Fasten through the crests (not the valleys) with sealing-washer roofing fasteners, ${clad === 'pvc' ? 'pre-drilling oversized holes so the PVC can expand' : 'about 6 per sheet at each purlin'}.${shed ? '' : ' Finish with the ridge cap.'} The plan area of the roof is ${num(roofPlanFt2)} sq ft — every 1" of rain can fill about ${num(rainGal)} gallons if you add gutters and a tank.` },
-    { title: 'Siding', text: `Hang ${tinPieces.filter((t) => t.use === 'siding').length} ${clad === 'pvc' ? 'PVC' : 'metal'} sheet pieces vertically on the walls, nailed to the rim, blocking rows and top plate. The siding runs down past the floor frame to keep rain off it. Cut the window and door openings with tin snips after the sheet is up, and cover the corners with 1x4 trim.` },
-    { title: 'Louvre windows', text: `Screw the ${P.windowH}' aluminium louvre frames into the ${nWin} window openings, then slide in the ${winList.reduce((s, x) => s + x.blades, 0)} ${P.windowW}' glass blades. Trim the outside with 1x4 casing; run a bead of sealant under the head casing.` },
-    { title: 'Door', text: `Install 1x6 jambs, then build the door from vertical 1x6 boards with a 1x4 Z-brace (the diagonal must run up from the bottom hinge side). Hang it on three galvanised T-hinges and fit a hasp. Trim the outside with 1x4 casing.` },
-    { title: 'Interior walls', text: `Nail ${wallPlyPieces.length} pieces of ${PLY[P.wallPly].name} to the inside of the wall studs with 1-1/4" galvanised panel nails. The space above the walls stays open to the roof for ventilation.` },
-    { title: 'Complete', text: `Finished: ${ftin(W)} × ${ftin(D)} raised house with a ${shed ? 'single-slope' : 'gable'} ${clad === 'pvc' ? 'PVC' : 'metal'} roof, ${nWin} louvre windows and a ${inch(P.doorW)} door. Recommended extras: insect screen behind the louvres, a gutter and water tank on the ${shed ? 'low' : 'back'} eave, and a coat of paint or oil on exposed wood.` },
+    { title: 'Bare site', text: `Choose the highest, best-drained ground available and clear it. The foundation is ${ftin(W)} × ${ftin(D)} (${num(floorArea)} sq ft). Turn the long walls toward the prevailing trade winds so the louvres cross-ventilate.` },
+    { title: 'Lay out & square the foundation', text: `Set batter boards about 2' outside each corner and stretch string lines on the outside edges of the slab at ${ftin(W)} and ${ftin(D)}. Square the layout by measuring the diagonals — both must be ${ftin(diag)}. Mark the ${nPosts} post centres: one at each corner and ${m} between the corners on every wall.` },
+    { title: 'Excavate', text: `Dig the slab area out ${ftin(digDepth)} below grade so the ${edge ? 'thickened edge' : `${inch(P.slabT)} slab`} finishes ${inch(P.slabAbove)} above the ground${edge ? ` (trench the 12"-wide edge beam ${ftin(P.slabT)} deep around the perimeter)` : ''}. Then dig ${nPosts} post holes, ${inch(P.holeDia)} across, down to ${ftin(P.embed + 4)} below the finished slab. Compact the bottom.` },
+    { title: 'Set posts, forms & rebar', text: `Each post is two 2x6s nailed together every 12", staggered. Wrap the part that goes into concrete in bitumen or heavy plastic. Stand the posts on 4" of concrete in their holes, plumb them both ways and brace them. Nail 2x6 form boards around the perimeter on stakes, with the top edge exactly level at slab height. Lay 6-mil plastic, then a ${inch(sp)} grid of 1/2" rebar on chairs at mid-depth, tied at the crossings and to the posts.` },
+    { title: 'Pour the slab', text: `Pour the post holes and slab in one go — about ${num(concreteFt3)} ft³ (${num(concreteFt3 / 27, 1)} yd³) of 1 : 2 : 3 concrete, roughly ${bagsR} bags of cement. That is a big hand-mixing job: line up a crew, mixers or boards, and plenty of fresh water. Screed the top flat, slope it slightly toward the doors, and set 1/2" J-bolts for the wall plates (${anchors}) while the concrete is wet. Keep it damp under wet sacks for 7 days.` },
+    { title: 'Frame the back wall', text: `Lay a strip of plastic or bitumen under the 2x4 bottom plate and bolt the plate to the slab. Frame between the posts with studs at ${inch(P.studSpacing)} on centre, ${blockLevels.length} rows of flat blocking for the siding, and a double top plate running over the posts. ${walls.back.openings.length ? `Openings: ${walls.back.openings.filter((o) => o.type === 'door').length} door, ${walls.back.openings.filter((o) => o.type === 'window').length} windows.` : ''}` },
+    { title: 'Frame the front wall', text: `Frame the front wall the same way, with ${walls.front.openings.filter((o) => o.type === 'door').length} door openings (${ftin(doorRO.w)} × ${ftin(doorRO.h)} rough opening, doubled 2x6 headers) and ${walls.front.openings.filter((o) => o.type === 'window').length} windows. The bottom plate is cut out at each door.` },
+    { title: 'Frame the end walls', text: `Frame both end walls. Each has ${walls.left.openings.filter((o) => o.type === 'door').length} door and ${walls.left.openings.filter((o) => o.type === 'window').length} louvre windows (${ftin(winRO.w)} × ${ftin(winRO.h)} rough opening, sill at ${ftin(sill)}). Windows are never more than ${ftin(S)} apart along a wall. Lap the top plates at the corners and strap every post to the plate.` },
+    { title: 'Roof framing', text: `Gable roof at ${P.pitch}:12. Raise the 2x6 ridge board on temporary props, then set ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre with ${inch(E)} eave overhangs. Tie every rafter to the plate with a hurricane tie. Add 2x4 ceiling ties on alternate pairs to stop the walls spreading, and fill the gable ends with studs. Nail 1x6 fascia to the rafter tails.` },
+    { title: 'Purlins', text: `Nail 2x4 purlins flat across the rafters, ${slopes.map((s) => s.purlins).join(' + ')} rows at no more than ${inch(P.purlinSpacing)} apart, overhanging the gable ends by ${inch(R)}.` },
+    { title: 'Roofing', text: `Lay ${tinPieces.filter((t) => t.use === 'roof').length} pieces of ${clad === 'pvc' ? 'PVC' : 'galvanised metal'} sheet, starting at the end away from the prevailing wind. Lap one corrugation at the sides and ${inch(LAP)} at any end joints. Fasten through the crests with sealing-washer roofing fasteners${clad === 'pvc' ? ', pre-drilling oversized holes so the PVC can expand' : ''}. Finish with the ridge cap. Each inch of rain on the ${num(roofPlanFt2)} sq ft roof is about ${num(rainGal)} gallons — worth catching with gutters and a tank.` },
+    { title: 'Siding', text: `Hang ${tinPieces.filter((t) => t.use === 'siding').length} ${clad === 'pvc' ? 'PVC' : 'metal'} siding pieces vertically, nailed to the bottom plate, blocking rows and top plate. Let them lap 1-1/2" down over the slab edge so rain drips clear. Cut the openings after the sheets are up and cover the corners with 1x4 trim.` },
+    { title: 'Louvre windows', text: `Screw the ${P.windowH}' aluminium louvre frames into the ${nWin} window openings and slide in the ${winList.reduce((s, x) => s + x.blades, 0)} ${P.windowW}' glass blades. Trim the outside with 1x4 casing.` },
+    { title: 'Doors', text: `Hang ${nDoors} doors (${doorDesc}). Each has 1x6 jambs and is built from vertical 1x6 boards with a 1x4 Z-brace — the diagonal runs up from the bottom hinge side. Use three galvanised T-hinges and a hasp per door, then trim the outside with 1x4 casing.` },
+    { title: 'Interior walls', text: `Nail ${wallPlyPieces.length} pieces of ${PLY[P.wallPly].name} to the inside of the wall framing with 1-1/4" galvanised panel nails. The roof space stays open above the walls for ventilation.` },
+    { title: 'Complete', text: `Finished: a ${ftin(W)} × ${ftin(D)} house on a concrete slab, with a gable ${clad === 'pvc' ? 'PVC' : 'metal'} roof, ${nPosts} posts, ${nWin} louvre windows and ${nDoors} doors. Recommended extras: insect screen behind the louvres, gutters and a water tank, and paint or oil on exposed wood.` },
   ];
 
-  // Dimension labels
   const dims = [
-    { a: [0, 0.3, D + 18], b: [W, 0.3, D + 18], label: ftin(W) },
-    { a: [W + 18, 0.3, 0], b: [W + 18, 0.3, D], label: ftin(D) },
+    { a: [0, y0 + 0.3, D + 18], b: [W, y0 + 0.3, D + 18], label: ftin(W) },
+    { a: [W + 18, y0 + 0.3, 0], b: [W + 18, y0 + 0.3, D], label: ftin(D) },
   ];
 
   return {
     P, W, D, parts: b.parts, steps, dims, warnings,
-    bounds: { min: [-R - 40, bottom - 4, -E - 40], max: [W + R + 40, roofTop(shed ? D + E : D / 2) + 12, zE + 40] },
+    bounds: { min: [-R - 40, bottom - 4, -E - 40], max: [W + R + 40, roofTop(D / 2) + 12, D + E + 40] },
     q: {
       lumber: b.lumber,
-      floorPly: { type: P.floorPly, pieces: floorPieces },
       wallPly: { type: P.wallPly, pieces: wallPlyPieces },
       tin: tinPieces,
       ridgePieces,
       windows: winList,
       concreteFt3,
       cementNet,
-      blocks,
-      bolts,
+      rebar,
+      plasticFt2,
+      anchors,
       ties,
       n16,
       n8,
       nPanel,
       roofFast,
       posts: posts.length,
-      hinges: 3,
+      doors: nDoors,
     },
     info: {
-      posts: posts.length, nx, nRows, rafterSize, diag, floorArea, roofAreaFt2, roofPlanFt2, rainGal, maxPost,
-      risers: nR, rise: r, nFront: fxs.length, studCount, topFront, topBack, yBb, sill, nWin,
-      ridgeHeight: roofTop(shed ? D + E : D / 2),
+      posts: nPosts, midPosts: m, rafterSize, diag, floorArea, roofPlanFt2, rainGal, maxPost, longSpan,
+      studCount, sill, nWin, nDoors, concreteFt3, ridgeHeight: roofTop(D / 2), digDepth,
     },
   };
 }

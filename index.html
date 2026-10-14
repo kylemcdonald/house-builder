@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Polowat House Builder</title>
-  <meta name="description" content="Parametric raised-floor house designer with 3D model, construction sequence, shipping layout and bill of materials.">
+  <meta name="description" content="Parametric slab-foundation house designer with 3D model, construction sequence, shipping layout and bill of materials.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M3 15 16 5l13 10' fill='none' stroke='%23c2410c' stroke-width='3'/%3E%3Cpath d='M7 14v9h18v-9' fill='%23f5d0a9' stroke='%23333' stroke-width='2'/%3E%3Cpath d='M9 23v6M23 23v6' stroke='%23333' stroke-width='2'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -24,7 +24,7 @@
       <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M3 15 16 5l13 10" fill="none" stroke="currentColor" stroke-width="3"/><path d="M7 14v9h18v-9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 23v6M23 23v6" stroke="currentColor" stroke-width="2"/></svg>
       <div>
         <h1>Polowat House Builder</h1>
-        <p class="sub" id="subtitle">12' × 8' raised house</p>
+        <p class="sub" id="subtitle"></p>
       </div>
     </div>
     <nav class="tabs" role="tablist">
@@ -42,22 +42,15 @@
         <h2>Size</h2>
         <div class="field">
           <label for="width">Width <span class="val" id="widthVal"></span></label>
-          <input type="range" id="width" min="8" max="32" step="0.5">
+          <input type="range" id="width" min="8" max="60" step="0.5">
         </div>
         <div class="field">
           <label for="depth">Depth <span class="val" id="depthVal"></span></label>
-          <input type="range" id="depth" min="6" max="24" step="0.5">
+          <input type="range" id="depth" min="6" max="30" step="0.5">
         </div>
       </section>
       <section class="group">
         <h2>Style</h2>
-        <div class="field">
-          <label>Roof</label>
-          <div class="seg" data-param="roof">
-            <button data-v="gable">Two slopes (gable)</button>
-            <button data-v="shed">Single slope</button>
-          </div>
-        </div>
         <div class="field">
           <label>Roof &amp; outer walls</label>
           <div class="seg" data-param="cladding">

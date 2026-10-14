@@ -1,6 +1,6 @@
 // Bill of materials: cut optimisation for lumber, sheet packing for plywood,
 // overage contingency per material group, pricing and weights.
-import { LUMBER, PLY, LUMBER_DENSITY, TIN_LB, CEMENT_LB, BLOCK_LB } from './catalog.js';
+import { LUMBER, PLY, LUMBER_DENSITY, TIN_LB, CEMENT_LB } from './catalog.js';
 
 const KERF = 0.125;
 
@@ -120,10 +120,11 @@ export function computeBOM(d, P, prices) {
     (groups[k] ||= []).push(l);
   }
   const catInfo = {
-    structure: { section: 'Posts & beams', ov: P.ovPosts },
+    structure: { section: 'Posts', ov: P.ovPosts },
+    formwork: { section: 'Slab formwork (reused for blocking afterwards)', ov: P.ovFraming },
     framing: { section: 'Framing lumber', ov: P.ovFraming },
   };
-  const order = ['structure', 'framing'];
+  const order = ['structure', 'formwork', 'framing'];
   const sizes = Object.keys(LUMBER);
   for (const cat of order) {
     for (const size of sizes) {
@@ -138,14 +139,7 @@ export function computeBOM(d, P, prices) {
   }
 
   // ---- plywood
-  const nFloor = packSheets(q.floorPly.pieces);
-  const nWall = packSheets(q.wallPly.pieces);
-  if (q.floorPly.type === q.wallPly.type) {
-    add('Plywood', q.floorPly.type, 'Floor + interior walls', nFloor + nWall, P.ovPly, { lb: PLY[q.floorPly.type].lb, unit: 'sheets' });
-  } else {
-    add('Plywood', q.floorPly.type, 'Floor sheathing', nFloor, P.ovPly, { lb: PLY[q.floorPly.type].lb, unit: 'sheets' });
-    add('Plywood', q.wallPly.type, 'Interior wall lining', nWall, P.ovPly, { lb: PLY[q.wallPly.type].lb, unit: 'sheets' });
-  }
+  add('Plywood', q.wallPly.type, 'Interior wall lining', packSheets(q.wallPly.pieces), P.ovPly, { lb: PLY[q.wallPly.type].lb, unit: 'sheets' });
 
   // ---- corrugated sheets
   const pre = P.cladding === 'pvc' ? 'pvc' : 'metal';
@@ -170,20 +164,24 @@ export function computeBOM(d, P, prices) {
     add('Windows', `louvreGlass${bl}`, `${blades} blades + 10% spare for breakage`, blades, 10, { lb: bl * 0.75 });
   }
 
-  // ---- concrete
-  add('Concrete', 'cement', `${q.posts} post footings + stair blocks (${q.concreteFt3.toFixed(1)} ft³ concrete)`, q.cementNet, P.ovCement, { lb: CEMENT_LB, unit: 'bags' });
-  add('Concrete', 'block', 'Stair footing', q.blocks, P.ovCement, { lb: BLOCK_LB });
+  // ---- foundation
+  add('Foundation', 'cement', `Slab + ${q.posts} post footings (${q.concreteFt3.toFixed(0)} ft³ concrete)`, q.cementNet, P.ovCement, { lb: CEMENT_LB, unit: 'bags' });
+  const bars = cutBoards(q.rebar.map((len) => ({ len, label: 'Rebar' })), 240);
+  cuts.push({ cat: 'rebar', section: 'Foundation', size: '1/2" rebar', stock: 240, boards: bars });
+  add('Foundation', 'rebar', `Slab grid (${q.rebar.length} pieces, 12" laps)`, bars.length, P.ovCement, { lb: 13.4 });
+  add('Foundation', 'tieWire', 'Rebar crossings', Math.max(1, Math.ceil(q.rebar.length / 25)), 0, { lb: 3.5, unit: 'rolls' });
+  add('Foundation', 'plastic', `Under slab (${q.plasticFt2.toFixed(0)} ft² incl. laps)`, q.plasticFt2 / 220, 0, { lb: 15, unit: 'rolls' });
 
   // ---- fasteners & hardware
   const ovF = P.ovFasteners;
   add('Fasteners & hardware', 'nail16', `Framing (~${Math.round(q.n16)} nails)`, Math.max(1, q.n16 / 45), ovF, { lb: 1, unit: 'lb' });
-  add('Fasteners & hardware', 'nail8', `Floor, stairs, trim (~${Math.round(q.n8)} nails)`, Math.max(1, q.n8 / 90), ovF, { lb: 1, unit: 'lb' });
+  add('Fasteners & hardware', 'nail8', `Trim, doors, fascia (~${Math.round(q.n8)} nails)`, Math.max(1, q.n8 / 90), ovF, { lb: 1, unit: 'lb' });
   add('Fasteners & hardware', 'nailPanel', `Interior plywood (~${Math.round(q.nPanel)} nails)`, Math.max(1, q.nPanel / 300), ovF, { lb: 1, unit: 'lb' });
   add('Fasteners & hardware', 'roofFast', `Roof & siding (~${Math.round(q.roofFast)})`, q.roofFast / 100, ovF, { lb: 1.6, unit: 'boxes' });
-  add('Fasteners & hardware', 'bolt', 'Beam-to-post connections', q.bolts, ovF, { lb: 0.7 });
-  add('Fasteners & hardware', 'tie', 'Joists, rafters, post straps', q.ties, ovF, { lb: 0.25 });
-  add('Fasteners & hardware', 'hinge', 'Door', q.hinges, 0, { lb: 0.8 });
-  add('Fasteners & hardware', 'hasp', 'Door', 1, 0, { lb: 1 });
+  add('Fasteners & hardware', 'anchor', 'Wall plates to slab', q.anchors, ovF, { lb: 0.6 });
+  add('Fasteners & hardware', 'tie', 'Rafters, post-to-plate straps', q.ties, ovF, { lb: 0.25 });
+  add('Fasteners & hardware', 'hinge', `${q.doors} doors × 3`, q.doors * 3, 0, { lb: 0.8 });
+  add('Fasteners & hardware', 'hasp', `${q.doors} doors`, q.doors, 0, { lb: 1 });
   add('Fasteners & hardware', 'postWrap', 'Post bases', q.posts, 0, { lb: 0.5 });
 
   // ---- local (not purchased)
@@ -194,7 +192,8 @@ export function computeBOM(d, P, prices) {
     { name: 'Fresh water for mixing & curing', qty: bags * 6, unit: 'gal' },
   ];
 
-  const sections = [...new Set(lines.map((l) => l.section))];
+  const ORDER = ['Foundation', 'Posts', 'Slab formwork (reused for blocking afterwards)', 'Framing lumber', 'Plywood', 'Roofing & siding', 'Windows', 'Fasteners & hardware'];
+  const sections = [...new Set(lines.map((l) => l.section))].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
   const subtotal = lines.reduce((s, l) => s + l.total, 0);
   const weight = lines.reduce((s, l) => s + l.lb, 0);
   return { lines, sections, cuts, tinBins: tin.bins, local, subtotal, weight };

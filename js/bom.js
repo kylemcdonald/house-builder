@@ -1,6 +1,6 @@
 // Bill of materials: cut optimisation for lumber, sheet packing for plywood,
 // overage contingency per material group, pricing and weights.
-import { LUMBER, PLY, LUMBER_DENSITY, TIN_LB, CEMENT_LB } from './catalog.js';
+import { LUMBER, PLY, LUMBER_DENSITY, TIN_LB, CEMENT_LB, MESH } from './catalog.js';
 
 const KERF = 0.125;
 
@@ -25,8 +25,11 @@ export function cutBoards(pieces, stock) {
   return boards;
 }
 
-// Cut corrugated-sheet pieces from 10' and 12' stock at the lowest cost.
-export function packTin(pieces, c10, c12) {
+// Cut corrugated-sheet pieces from the stock lengths on offer
+// (stocks = [{len, cost}]) at the lowest cost.
+export function packTin(pieces, stocks) {
+  const st = [...stocks].sort((a, b) => a.len - b.len);
+  const maxLen = st[st.length - 1].len;
   const sorted = [...pieces].sort((a, b) => b.len - a.len);
   let best = null;
   for (const strat of ['small', 'big', 'smart']) {
@@ -35,25 +38,33 @@ export function packTin(pieces, c10, c12) {
       let bin = null;
       for (const b of bins) if (b.left >= p.len - 1e-6 && (!bin || b.left < bin.left)) bin = b;
       if (!bin) {
-        let stock = p.len <= 120 ? 120 : 144;
-        if (strat === 'big') stock = 144;
-        if (strat === 'smart' && p.len <= 120) {
+        const fit = st.filter((s) => s.len >= p.len - 1e-6);
+        let stock = fit.length ? fit[0].len : Math.ceil(p.len / 12) * 12;
+        if (strat === 'big') stock = Math.max(stock, maxLen);
+        if (strat === 'smart' && fit.length > 1) {
+          // take a longer sheet when its offcut would be used by a later piece
           const rest = sorted.slice(idx + 1);
           const fits = (cap) => rest.some((r) => r.len <= cap - p.len);
-          if (!fits(120) && fits(144)) stock = 144;
+          if (!fits(fit[0].len)) stock = (fit.find((s) => fits(s.len)) || fit[0]).len;
         }
-        if (p.len > stock) stock = Math.ceil(p.len / 12) * 12;
         bin = { stock, left: stock, pieces: [] };
         bins.push(bin);
       }
       bin.left -= p.len;
       bin.pieces.push(p);
     });
-    for (const b of bins) if (b.stock - b.left <= 120) { b.left -= b.stock - 120; b.stock = 120; }
-    const n120 = bins.filter((b) => b.stock === 120).length;
-    const n144 = bins.length - n120;
-    const cost = n120 * c10 + n144 * c12;
-    if (!best || cost < best.cost - 1e-6) best = { bins, n120, n144, cost };
+    // then swap each sheet for the cheapest stock that still holds its pieces
+    let cost = 0;
+    for (const b of bins) {
+      const used = b.stock - b.left;
+      const opts = st.filter((s) => s.len >= used - 1e-6).sort((x, y) => x.cost - y.cost || x.len - y.len);
+      if (opts.length) {
+        b.left = opts[0].len - used;
+        b.stock = opts[0].len;
+        cost += opts[0].cost;
+      } else cost += st[st.length - 1].cost * Math.ceil(b.stock / maxLen);
+    }
+    if (!best || cost < best.cost - 1e-6) best = { bins, cost };
   }
   return best;
 }
@@ -108,7 +119,7 @@ export function computeBOM(d, P, prices) {
     const price = pr(key);
     lines.push({
       section, key, name: opts.name || prices[key]?.name || key, use, net, ov: ovPct, buy, unit, price,
-      total: buy * price, est: !!prices[key]?.est, note: prices[key]?.note, lb: (opts.lb || 0) * buy, local: !!opts.local,
+      total: buy * price, est: !!prices[key]?.est, quote: !!prices[key]?.quote, note: prices[key]?.note, lb: (opts.lb || 0) * buy, local: !!opts.local,
     });
   };
 
@@ -142,8 +153,9 @@ export function computeBOM(d, P, prices) {
 
   // ---- corrugated sheets
   const pre = P.cladding === 'pvc' ? 'pvc' : 'metal';
-  const tin = packTin(q.tin, pr(`${pre}10`), pr(`${pre}12`));
-  for (const stock of [120, 144]) {
+  const stocks = [8, 10, 12].filter((f) => prices[`${pre}${f}`]).map((f) => ({ len: f * 12, cost: pr(`${pre}${f}`) }));
+  const tin = packTin(q.tin, stocks);
+  for (const { len: stock } of stocks) {
     const bins = tin.bins.filter((b) => b.stock === stock);
     const pcs = bins.flatMap((b) => b.pieces);
     const roof = pcs.filter((t) => t.use === 'roof').length;
@@ -152,6 +164,8 @@ export function computeBOM(d, P, prices) {
     add('Roofing & siding', `${pre}${stock / 12}`, uses, bins.length, P.ovTin, { lb: (stock / 12) * TIN_LB[pre], unit: 'sheets' });
   }
   if (q.ridgePieces) add('Roofing & siding', pre === 'pvc' ? 'ridgePvc' : 'ridgeMetal', 'Ridge', q.ridgePieces, P.ovTin, { lb: 8 });
+  // a 10.1 oz tube runs about 20 ft of 3/8" bead
+  add('Roofing & siding', 'sealant', `Where the sheets meet the concrete (${Math.round(q.sealFt)} ft)`, q.sealFt / 20, P.ovFasteners, { lb: 0.9, unit: 'tubes' });
 
   // ---- windows
   const nWin = q.windows.length;
@@ -166,10 +180,13 @@ export function computeBOM(d, P, prices) {
   // ---- floor slab
   if (q.concreteFt3 > 0) {
     add('Floor slab', 'cement', `New floor slab (${q.concreteFt3.toFixed(0)} ft³ concrete)`, q.cementNet, P.ovCement, { lb: CEMENT_LB, unit: 'bags' });
-    const bars = cutBoards(q.rebar.map((len) => ({ len, label: 'Rebar' })), 240);
-    cuts.push({ cat: 'rebar', section: 'Floor slab', size: '1/2" rebar', stock: 240, boards: bars });
-    add('Floor slab', 'rebar', `Floor grid (${q.rebar.length} pieces, 12" laps)`, bars.length, P.ovCement, { lb: 13.4 });
-    add('Floor slab', 'tieWire', 'Rebar crossings', Math.max(1, Math.ceil(q.rebar.length / 25)), 0, { lb: 3.5, unit: 'rolls' });
+    const rolls = cutBoards(q.mesh.map((len) => ({ len, label: 'Mesh strip' })), MESH.len);
+    cuts.push({ cat: 'mesh', section: 'Floor slab', size: '7\' wire mesh', stock: MESH.len, boards: rolls });
+    const meshFt = q.mesh.reduce((t, l) => t + l, 0) / 12;
+    // whole rolls only; the offcut is the contingency
+    const spare = (rolls.length * MESH.len) / 12 - meshFt;
+    add('Floor slab', 'mesh', `Floor reinforcement: ${q.mesh.length} strips, ${Math.round(meshFt)} ft with 6" laps, ${Math.round(spare)} ft spare`, rolls.length, 0, { lb: MESH.lb, unit: 'rolls' });
+    add('Floor slab', 'tieWire', 'Tying the mesh laps', 1, 0, { lb: 3.5, unit: 'rolls' });
     add('Floor slab', 'plastic', `Under slab (${q.plasticFt2.toFixed(0)} ft² incl. laps)`, q.plasticFt2 / 220, 0, { lb: 15, unit: 'rolls' });
   }
 
@@ -196,15 +213,16 @@ export function computeBOM(d, P, prices) {
   const ORDER = ['Floor slab', 'Framing lumber', 'Plywood', 'Roofing & siding', 'Windows', 'Fasteners & hardware'];
   const sections = [...new Set(lines.map((l) => l.section))].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
   const subtotal = lines.reduce((s, l) => s + l.total, 0);
+  const tax = (subtotal * (P.tax || 0)) / 100;
   const weight = lines.reduce((s, l) => s + l.lb, 0);
-  return { lines, sections, cuts, tinBins: tin.bins, local, subtotal, weight };
+  return { lines, sections, cuts, tinBins: tin.bins, local, subtotal, tax, weight };
 }
 
 // Sum of quantities by store item (for the consolidated shopping list).
 export function shoppingList(bom) {
   const m = new Map();
   for (const l of bom.lines) {
-    const e = m.get(l.key) || { key: l.key, name: l.name, buy: 0, price: l.price, unit: l.unit, est: l.est };
+    const e = m.get(l.key) || { key: l.key, name: l.name, buy: 0, price: l.price, unit: l.unit, est: l.est, quote: l.quote };
     e.buy += l.buy;
     m.set(l.key, e);
   }

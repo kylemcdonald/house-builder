@@ -6,7 +6,7 @@
 // Y = up (ground = 0), Z = depth (back wall at z=0, front/door wall at z=D).
 
 import * as THREE from 'three';
-import { LUMBER, PLY, BAG_YIELD_FT3 } from './catalog.js';
+import { LUMBER, PLY, BAG_YIELD_FT3, MESH, QUOTE } from './catalog.js';
 import { ftin, inch, num } from './format.js';
 
 export const DEFAULTS = {
@@ -24,7 +24,6 @@ export const DEFAULTS = {
   // new floor slab inside the outline
   floorSlab: 'yes',
   floorSlabT: 4,
-  rebarSpacing: 24,
   // roof
   pitch: 4,
   eave: 24,
@@ -51,6 +50,7 @@ export const DEFAULTS = {
   ovFasteners: 15,
   ovCement: 15,
   freight: 0,
+  tax: QUOTE.tax, // sales tax, %
 };
 
 export const STEP = {
@@ -412,23 +412,49 @@ export function design(P) {
   // ---------------------------------------------------------------- floor slab
   const slab = P.floorSlab === 'yes';
   const T = P.floorSlabT;
-  const rebar = [];
+  const mesh = []; // strip lengths cut from the 7' × 100' rolls
+  let meshDir = 'x';
   let concreteFt3 = 0;
   if (slab) {
-    const ro = { mat: 'rebar', group: 'floor', step: STEP.FLOOR_PREP, stepTo: STEP.FLOOR_PREP, name: '1/2" rebar', ex: ex0 };
-    const barPieces = (L) => {
-      const n = Math.max(1, Math.ceil((L - 12) / (240 - 12)));
-      for (let i = 0; i < n; i++) rebar.push((L + 12 * (n - 1)) / n);
+    // Welded wire mesh in 7' strips lapped one square (6"), 3" in from the
+    // pony walls. Run the strips whichever way uses the fewest rolls.
+    const lo = [Pt + 3, Pt + 3];
+    const hi = [W - Pt - 3, D - Pt - 3];
+    const g = MESH.grid;
+    const plan = (a) => {
+      const L = hi[a] - lo[a];
+      const across = hi[1 - a] - lo[1 - a];
+      const n = across <= MESH.w ? 1 : Math.ceil((across - MESH.w) / (MESH.w - g)) + 1;
+      const lens = Array(n).fill(L);
+      let rolls = 0;
+      const left = [];
+      for (const l of lens) {
+        const i = left.findIndex((r) => r >= l);
+        if (i >= 0) left[i] -= l;
+        else { left.push(MESH.len - l); rolls++; }
+      }
+      return { a, L, n, lens, rolls, tot: L * n };
     };
+    const px = plan(0);
+    const pz = plan(1);
+    const best = px.rolls < pz.rolls || (px.rolls === pz.rolls && px.tot <= pz.tot) ? px : pz;
+    meshDir = best.a === 0 ? 'x' : 'z';
+    mesh.push(...best.lens);
+    const mo = { mat: 'steel', group: 'floor', step: STEP.FLOOR_PREP, stepTo: STEP.FLOOR_PREP, name: 'Galv. wire mesh #10, 6" × 6"', ex: ex0 };
     const ry = y0 - T / 2;
-    const sp = P.rebarSpacing;
-    for (let z = Pt + 3; z <= D - Pt - 3 + 0.01; z += sp) {
-      b.box(Pt + 3, W - Pt - 3, ry - 0.5, ry, z - 0.25, z + 0.25, ro);
-      barPieces(W - 2 * Pt - 6);
-    }
-    for (let x = Pt + 3; x <= W - Pt - 3 + 0.01; x += sp) {
-      b.box(x - 0.25, x + 0.25, ry, ry + 0.5, Pt + 3, D - Pt - 3, ro);
-      barPieces(D - 2 * Pt - 6);
+    const r = MESH.wire;
+    const a = best.a;
+    // box in strip coords: u along the strip, c across it
+    const wire = (u0, u1, c0, c1, yb) => {
+      const [x0, x1, z0, z1] = a === 0 ? [u0, u1, c0, c1] : [c0, c1, u0, u1];
+      b.box(x0, x1, yb, yb + r, z0, z1, mo);
+    };
+    for (let k = 0; k < best.n; k++) {
+      const c0 = lo[1 - a] + k * (MESH.w - g);
+      const c1 = Math.min(c0 + MESH.w, hi[1 - a]);
+      const yb = ry + (k % 2) * 2 * r; // laps sit on top of the strip below
+      for (let c = c0; c <= c1 + 0.01; c += g) wire(lo[a], hi[a], c - r / 2, c + r / 2, yb + r);
+      for (let u = lo[a]; u <= hi[a] + 0.01; u += g) wire(u - r / 2, u + r / 2, c0, c1, yb);
     }
     b.box(Pt, W - Pt, y0 - T - 0.1, y0 - T, Pt, D - Pt, { mat: 'plastic', name: '6-mil plastic under the floor', group: 'floor', step: STEP.FLOOR_PREP, stepTo: STEP.FLOOR_PREP, ex: ex0 });
     b.box(Pt, W - Pt, y0 - T, y0, Pt, D - Pt, { mat: 'concrete', name: `New floor slab, ${inch(T)} thick`, group: 'floor', step: STEP.FLOOR, ex: [0, -0.8 * EX, 0] });
@@ -1052,6 +1078,15 @@ export function design(P) {
   const roofFast = hc('roofScrew');
   const wedge = hc('wedge');
   const screws = hc('conScrew');
+  // where corrugated sheet meets concrete: along the pony wall, the columns
+  // and the ring beam in every bay, and under the gables
+  let sealIn = 0;
+  for (const w of Object.values(walls)) {
+    for (const [a, c] of w.bays) sealIn += 2 * (c - a) + 2 * (Rb - PH + 1.5);
+    for (const [g0, g1] of w.covered) sealIn += 2 * PH + (g1 - g0);
+    if (w.sideTop) sealIn += w.L;
+  }
+  const sealFt = sealIn / 12;
 
   // ---------------------------------------------------------------- steps
   const diag = Math.hypot(W, D);
@@ -1068,7 +1103,7 @@ export function design(P) {
   const covText = nCov ? ` ${nCov} existing door gap${nCov > 1 ? 's are' : ' is'} closed up instead of getting a door: a 2x4 plate on the floor, studs down to it, and a nailer level with the pony-wall top, then tin outside and plywood inside like the rest of the wall.` : '';
   const steps = [
     { title: 'Existing concrete frame', text: `Already built: a ${ftin(W)} × ${ftin(D)} concrete outline, ${inch(Pt)} thick. On it are pony walls ${ftin(PH)} high and ${nColumns} columns (${inch(C)} × ${inch(C)}: the corners plus ${m} along each wall), with a ${inch(P.ringH)} ring beam whose underside is ${ftin(Rb)} above the floor. Before ordering, check: both diagonals ${ftin(diag)}; the clear bays between columns (long walls ${bayList}; end walls ${endBays}); and the ring-beam height. Adjust the inputs to match what was actually poured.` },
-    slab ? { title: 'Prepare the floor', text: `Fill inside the outline with compacted sand or coral to ${ftin(T)} below the finished floor. Lay 6-mil plastic, then a ${inch(P.rebarSpacing)} grid of 1/2" rebar on chairs.` } : { title: 'Floor (not included)', text: 'No floor slab is included in this design. Turn it on under "Floor slab" to add it to the plan and the bill of materials.' },
+    slab ? { title: 'Prepare the floor', text: `Fill inside the outline with compacted sand or coral to ${ftin(T)} below the finished floor. Lay 6-mil plastic, then ${mesh.length} strips of 6" × 6" #10 galvanised wire mesh, ${ftin(mesh[0] || 0)} long, running ${meshDir === 'x' ? 'along the house' : 'across the house'}. Lap the strips one square (6") and tie the laps with wire. Set the mesh on small blocks or pull it up into the middle of the slab as you pour, so it isn't left at the bottom.` } : { title: 'Floor (not included)', text: 'No floor slab is included in this design. Turn it on under "Floor slab" to add it to the plan and the bill of materials.' },
     slab ? { title: 'Pour the floor slab', text: `Pour a ${inch(T)} floor slab inside the outline — ${num(concreteFt3)} ft³, about ${Math.ceil(cementNet)} bags of cement. The pony walls act as the form. Leave the door thresholds flush and slope the floor slightly toward the doors. Keep it damp for a week.` } : { title: 'Floor (not included)', text: 'Skipped.' },
     { title: 'Wall plates', text: `Bolt a 2x6 wall plate flat on top of the ring beam with 1/2" wedge anchors about every 32" (${wedge} anchors) — the rafters sit on this. In every bay, fasten a 2x4 bottom plate to the pony wall and a 2x4 top plate to the underside of the ring beam, using concrete screws (drill with a hammer drill). Put a strip of plastic or bitumen under any wood that touches concrete.` },
     { title: 'Infill the long walls', text: `Frame each bay between the columns. Studs at ${inch(P.studSpacing)} on centre are screwed to the columns at each end, with ${blockLevels.length} row${blockLevels.length > 1 ? 's' : ''} of flat blocking for the siding. Front wall: ${count('front', 'door')} doors, ${count('front', 'window')} windows. Back wall: ${count('back', 'door')} door${count('back', 'door') === 1 ? '' : 's'}, ${count('back', 'window')} windows. The ring beam carries the roof, so openings need only a flat 2x4 head, not a header.${covText}` },
@@ -1093,7 +1128,7 @@ export function design(P) {
     bounds: { min: [-R - 40, footBot, -E - 40], max: [W + R + 40, roofTop(D / 2) + 12, D + E + 40] },
     q: {
       lumber: b.lumber, wallPly: { type: P.wallPly, pieces: wallPlyPieces }, tin: tinPieces, ridgePieces, windows: winList,
-      concreteFt3, cementNet, rebar, plasticFt2, wedge, screws, ties, n16, n8, nPanel, roofFast, doors: nDoors,
+      concreteFt3, cementNet, mesh, plasticFt2, sealFt, wedge, screws, ties, n16, n8, nPanel, roofFast, doors: nDoors,
     },
     doorGrid: Object.fromEntries(Object.values(walls).map((w) => [w.key, w.bays.map(([a, c], i) => ({ width: c - a, fits: w.doorFits[i], door: w.openings.some((o) => o.type === 'door' && o.u0 >= a && o.u1 <= c), covered: w.covered.some(([g0, g1]) => g0 >= a && g1 <= c) }))])),
     info: {

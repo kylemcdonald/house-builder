@@ -23,15 +23,15 @@ Every dimension of the existing concrete can be set to match what was actually p
 - **3D model** (three.js) with two looks: a flat **SketchUp-style** view with outlines, and a **realistic** view with procedural wood, concrete, galvanised steel, PVC, plywood and sand, sky lighting, shadows and ambient occlusion.
 - **Gable roof** in **metal or PVC "tinroof"**; outer walls in the same material and inner walls in plywood.
 - **Doors and windows**: in a wall × bay grid, tick the bays that have a door gap in the pony wall. A second grid closes chosen gaps with framing, corrugated sheet and plywood instead of a door. Windows are spread along every wall no further apart than a maximum spacing you choose.
-- **Existing concrete inputs**: column count and size, pony wall height and thickness, and ring beam height. There is an optional new floor slab with a rebar grid and plastic underlay.
+- **Existing concrete inputs**: column count and size, pony wall height and thickness, and ring beam height. There is an optional new floor slab reinforced with 6″ × 6″ galvanised wire mesh over a plastic underlay.
 - **All hardware is drawn**: framing nails and toenails, concrete screws, wedge anchors, hurricane ties, roofing screws on every purlin and girt, panel nails, casing nails, T-hinges, hasps and padlocks. The fastener counts in the bill of materials come from this hardware.
 - **Explode slider** that separates the building into its layers.
 - **Construction playback**: 13 steps, from the existing concrete through the floor, wall plates, infill walls, roof, siding, windows and doors, to the interior plywood. Each step has a written explanation that uses the real dimensions and quantities.
 - **Shipping layout**: every purchased item laid flat in strapped bundles, with sizes, volume and weight for the ferry.
-- **Bill of materials** priced from the shop sign:
+- **Bill of materials** priced from the shop's written quote where it lists the item, and from the shop's price sign otherwise, plus 6% sales tax:
   - lumber is cut-optimised, and every board gets a cut diagram
   - plywood is nested on 4×8 sheets
-  - 10′ and 12′ corrugated sheets are chosen at the lowest cost
+  - 8′, 10′ and 12′ corrugated sheets are chosen at the lowest cost
   - each material group has its own contingency/overage
   - prices are editable, and you can export a CSV
 - **Design notes**: key specs, the reasons behind the design choices, and the assumptions you should check.

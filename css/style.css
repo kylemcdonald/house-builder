@@ -205,6 +205,7 @@ table.t tr.tot td { font-weight: 700; background: var(--chip); }
 table.t td .use { color: var(--muted); font-size: 12px; }
 table.t input.price { width: 76px; text-align: right; padding: 3px 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); color: var(--ink); font: inherit; }
 .badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: #fef3c7; color: #92400e; margin-left: 4px; vertical-align: 1px; }
+.badge.quote { background: #dcfce7; color: #166534; }
 .table-wrap { overflow-x: auto; }
 .cutlist { display: grid; gap: 4px; }
 .cut-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }

@@ -2,7 +2,7 @@ import { design, DEFAULTS, STEP, WALL_KEYS, parseDoorBays, formatDoorBays } from
 import { computeBOM, shoppingList } from './bom.js';
 import { shippingLayout } from './shipping.js';
 import { Viewer } from './viewer.js';
-import { DEFAULT_PRICES, PLY } from './catalog.js';
+import { DEFAULT_PRICES, PLY, QUOTE } from './catalog.js';
 import { ftin, inch, money, num } from './format.js';
 
 const $ = (s) => document.querySelector(s);
@@ -26,7 +26,7 @@ function writeHash() {
 readHash();
 window.addEventListener('hashchange', () => { readHash(); schedule(); });
 
-const PRICE_KEY = 'polowat-house-prices-v1';
+const PRICE_KEY = 'polowat-house-prices-v2'; // v2: prices from the written quote
 let prices = structuredClone(DEFAULT_PRICES);
 try {
   const saved = JSON.parse(localStorage.getItem(PRICE_KEY) || '{}');
@@ -73,7 +73,6 @@ const ADV = [
     title: 'Floor slab', open: false, fields: [
       { k: 'floorSlab', label: 'Pour a concrete floor inside the outline', type: 'select', str: true, opts: [['yes', 'Yes'], ['no', 'No']] },
       { k: 'floorSlabT', label: 'Floor slab thickness', min: 3, max: 8, step: 0.5, fmt: inch },
-      { k: 'rebarSpacing', label: 'Rebar grid', type: 'select', opts: [[12, '12" o.c.'], [16, '16" o.c.'], [18, '18" o.c.'], [24, '24" o.c.']] },
     ],
   },
   {
@@ -98,11 +97,12 @@ const ADV = [
       { k: 'ovPly', label: 'Inner wall plywood', type: 'pct' },
       { k: 'ovFraming', label: 'Framing lumber', type: 'pct' },
       { k: 'ovFasteners', label: 'Nails, fasteners & hardware', type: 'pct' },
-      { k: 'ovCement', label: 'Floor slab cement & rebar', type: 'pct' },
+      { k: 'ovCement', label: 'Floor slab cement', type: 'pct' },
     ],
   },
   {
-    title: 'Shipping', open: false, fields: [
+    title: 'Tax & shipping', open: false, fields: [
+      { k: 'tax', label: 'Sales tax', type: 'pct', hint: `${QUOTE.tax}% on the shop's quote` },
       { k: 'freight', label: 'Ferry freight rate ($ per ft³)', type: 'num', step: 0.25, hint: 'Leave at 0 to exclude freight from the total' },
     ],
   },
@@ -377,13 +377,13 @@ function freightCost() {
 function renderBOM() {
   const b = BOM;
   const freight = freightCost();
-  const total = b.subtotal + freight;
+  const total = b.subtotal + b.tax + freight;
   $('#totalChip').textContent = money(total);
   const floorArea = D.info.floorArea;
   let h = `<h2>Bill of materials</h2>
-  <p class="muted">Quantities are computed from the 3D model: lumber is cut-optimised from 16' boards, plywood is nested on 4'×8' sheets, nails, screws, anchors and ties are counted from the hardware drawn in the model, and each group carries its own contingency (set in the sidebar). Prices come from the Weno supply shop sign; items marked <span class="badge">est.</span> are not on the sign and are estimates — edit any price and it is saved in this browser.</p>
+  <p class="muted">Quantities are computed from the 3D model: lumber is cut-optimised from 16' boards, plywood is nested on 4'×8' sheets, nails, screws, anchors and ties are counted from the hardware drawn in the model, and each group carries its own contingency (set in the sidebar). Prices marked <span class="badge quote">quote</span> come from the Weno supply shop's written quote (${QUOTE.ref}, ${QUOTE.date}, valid for 7 days); the rest come from the shop's price sign, and items marked <span class="badge">est.</span> are on neither and are estimates. Edit any price and it is saved in this browser.</p>
   <div class="cards">
-    <div class="card"><div class="k">Total</div><div class="v">${money(total)}</div><div class="s">${freight ? `incl. ${money(freight)} freight` : 'materials only'}</div></div>
+    <div class="card"><div class="k">Total</div><div class="v">${money(total)}</div><div class="s">incl. ${P.tax}% tax${freight ? ` and ${money(freight)} freight` : ''}</div></div>
     <div class="card"><div class="k">Per sq ft of floor</div><div class="v">${money(total / floorArea)}</div><div class="s">${num(floorArea)} sq ft</div></div>
     <div class="card"><div class="k">Shipping weight</div><div class="v">${num(SHIP.totLb)} lb</div><div class="s">${num(SHIP.totLb * 0.4536)} kg</div></div>
     <div class="card"><div class="k">Shipping volume</div><div class="v">${num(SHIP.totVol)} ft³</div><div class="s">${num((SHIP.totVol / 1172) * 100)}% of a 20' container</div></div>
@@ -391,7 +391,7 @@ function renderBOM() {
   <div class="actions">
     <button class="btn" id="csvBtn">Download CSV</button>
     <button class="btn" id="printBtn">Print</button>
-    <button class="btn" id="resetPrices">Reset prices to shop sign</button>
+    <button class="btn" id="resetPrices">Reset prices</button>
   </div>
   <div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th>Used for</th><th class="n">Net</th><th class="n">+ Over</th><th class="n">Buy</th><th class="n">Unit price</th><th class="n">Total</th></tr></thead><tbody>`;
   for (const sec of b.sections) {
@@ -399,7 +399,7 @@ function renderBOM() {
     const st = ls.reduce((s, l) => s + l.total, 0);
     h += `<tr class="sec"><td colspan="6">${sec}</td><td class="n">${money(st)}</td></tr>`;
     for (const l of ls) {
-      h += `<tr><td>${l.name}${l.est ? '<span class="badge">est.</span>' : ''}${l.note ? `<div class="use">⚠ ${l.note}</div>` : ''}</td>
+      h += `<tr><td>${l.name}${l.est ? '<span class="badge">est.</span>' : ''}${l.quote ? '<span class="badge quote">quote</span>' : ''}${l.note ? `<div class="use">⚠ ${l.note}</div>` : ''}</td>
       <td><span class="use">${l.use}</span></td>
       <td class="n">${num(l.net, l.net % 1 ? 1 : 0)}</td>
       <td class="n">${l.ov}%</td>
@@ -409,13 +409,14 @@ function renderBOM() {
     }
   }
   h += `<tr class="tot"><td colspan="6">Materials subtotal</td><td class="n">${money(b.subtotal)}</td></tr>`;
+  if (b.tax) h += `<tr><td colspan="6">Sales tax ${P.tax}%</td><td class="n">${money(b.tax)}</td></tr>`;
   if (freight) h += `<tr><td colspan="6">Ferry freight: ${num(SHIP.totVol)} ft³ × ${money(P.freight)}</td><td class="n">${money(freight)}</td></tr>`;
   h += `<tr class="tot"><td colspan="6">Total</td><td class="n">${money(total)}</td></tr></tbody></table></div>`;
 
   // consolidated shopping list
   const shop = shoppingList(b);
   h += `<h3>Shopping list (what to ask for at the counter)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Total</th></tr></thead><tbody>`;
-  for (const s of shop) h += `<tr><td>${s.name}${s.est ? '<span class="badge">est.</span>' : ''}</td><td class="n">${num(s.buy)} ${s.unit !== 'ea' ? s.unit : ''}</td><td class="n">${money(s.price)}</td><td class="n">${money(s.total)}</td></tr>`;
+  for (const s of shop) h += `<tr><td>${s.name}${s.est ? '<span class="badge">est.</span>' : ''}${s.quote ? '<span class="badge quote">quote</span>' : ''}</td><td class="n">${num(s.buy)} ${s.unit !== 'ea' ? s.unit : ''}</td><td class="n">${money(s.price)}</td><td class="n">${money(s.total)}</td></tr>`;
   h += `</tbody></table></div>`;
 
   h += `<h3>Local materials (gathered on Polowat, not purchased)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Material</th><th class="n">Qty</th></tr></thead><tbody>`;
@@ -459,6 +460,8 @@ function downloadCSV() {
   const rows = [['Section', 'Item', 'Used for', 'Net', 'Overage %', 'Buy', 'Unit', 'Unit price', 'Total', 'Estimated price']];
   for (const l of BOM.lines) rows.push([l.section, l.name, l.use, l.net.toFixed(2), l.ov, l.buy, l.unit, l.price.toFixed(2), l.total.toFixed(2), l.est ? 'yes' : '']);
   rows.push(['', 'Subtotal', '', '', '', '', '', '', BOM.subtotal.toFixed(2), '']);
+  if (BOM.tax) rows.push(['', `Sales tax ${P.tax}%`, '', '', '', '', '', '', BOM.tax.toFixed(2), '']);
+  rows.push(['', 'Total', '', '', '', '', '', '', (BOM.subtotal + BOM.tax + freightCost()).toFixed(2), '']);
   if (freightCost()) rows.push(['', 'Freight', '', '', '', '', '', '', freightCost().toFixed(2), '']);
   const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
   const a = document.createElement('a');
@@ -526,10 +529,10 @@ function renderNotes() {
   h += `<h3>Design choices &amp; improvements</h3><div class="note-grid">${notes.map(([t, p]) => `<div class="note"><h4>${t}</h4><p>${p}</p></div>`).join('')}</div>`;
   h += `<h3>Assumptions to verify</h3><ul>
     <li>Lumber is assumed to be dressed to standard sizes (2x6 = 1-1/2" × 5-1/2"). If the shop sells rough-sawn full-size lumber, the design still works and is stronger.</li>
-    <li>The cement price was taped over on the shop sign; ${money(prices.cement.price)} per 40 kg bag is a placeholder. Prices marked <span class="badge">est.</span> are not on the sign.</li>
+    <li>Prices come from the shop's written quote (${QUOTE.ref}, ${QUOTE.date}) where it lists the item, otherwise from the price sign. The quote is only valid for 7 days, and adds ${QUOTE.tax}% sales tax. Galvanised flashing and the 36" solid-core door were out of stock; neither is used here (the ridge cap price is still an estimate). The cement on the quote is assumed to be a 40 kg bag.</li>
     <li>Louvre frames are assumed to be sold by height (3' or 4') and glass blades by length (3' or 4' — this sets the window width). About one blade per 3-1/2" of frame height.</li>
     <li>Corrugated sheets are assumed to be 33" wide with ${inch(P.tinCover)} of cover. Measure a sheet in the shop and adjust under “Sheet materials”.</li>
-    <li>Floor concrete is a 1 : 2 : 3 mix, which gives about 3.7 ft³ per 40 kg bag. Rebar, tie wire, plastic, wedge anchors and concrete screws are not on the shop sign, so their prices are estimates. You will also need a hammer drill and masonry bits.</li>
+    <li>Floor concrete is a 1 : 2 : 3 mix, which gives about 3.7 ft³ per 40 kg bag. The floor is reinforced with 6" × 6" #10 galvanised wire mesh from 7' × 100' rolls instead of rebar. Tie wire, plastic, wedge anchors, concrete screws and nails are not on the quote or the sign, so their prices are estimates. You will also need a hammer drill and masonry bits.</li>
     <li>This is a planning tool, not a stamped engineering design. Have someone experienced with local typhoon construction review it.</li>
   </ul>`;
   $('#notesDoc').innerHTML = h;

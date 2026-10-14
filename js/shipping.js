@@ -45,7 +45,7 @@ export function shippingLayout(bom, P) {
   }
   const tinMat = P.cladding === 'pvc' ? 'pvc' : 'tin';
   for (const l of bom.lines.filter((x) => /^(metal|pvc)\d+$/.test(x.key))) {
-    const L = l.key.endsWith('12') ? 144 : 120;
+    const L = Number(l.key.match(/\d+$/)[0]) * 12;
     const n = l.buy;
     const sw = P.tinCover + 3;
     gens.push({
@@ -94,19 +94,13 @@ export function shippingLayout(bom, P) {
       });
     }
   }
-  const rebar = bom.lines.find((x) => x.key === 'rebar');
-  if (rebar) {
-    const n = rebar.buy;
-    const cols = Math.max(1, Math.ceil(Math.sqrt(n)));
-    const layers = Math.ceil(n / cols);
+  const mesh = bom.lines.find((x) => x.key === 'mesh');
+  if (mesh) {
+    const d = 30; // a 100' roll of 7' mesh coils to about 30" across
     gens.push({
-      name: 'Rebar 20 ft (tied bundle)', qty: `${n} bars`, L: 240, Wd: cols * 0.6, H: layers * 0.6, lb: rebar.lb,
+      name: 'Wire mesh rolls', qty: `${mesh.buy} roll${mesh.buy > 1 ? 's' : ''}`, L: 84, Wd: mesh.buy * (d + 2), H: d, lb: mesh.lb,
       draw(x, z) {
-        for (let i = 0; i < n; i++) {
-          const c = i % cols;
-          const r = Math.floor(i / cols);
-          box(x, x + 240, r * 0.6, r * 0.6 + 0.5, z + c * 0.6, z + c * 0.6 + 0.5, 'rebar', '1/2" rebar × 20\'', `${i + 1} of ${n}`);
-        }
+        for (let i = 0; i < mesh.buy; i++) parts.push({ id: id++, kind: 'cyl', r: d / 2, h: 84, pos: [x + 42, d / 2, z + i * (d + 2) + d / 2], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'steel', name: mesh.name, info: `roll ${i + 1} of ${mesh.buy}` });
       },
     });
   }
@@ -140,14 +134,14 @@ export function shippingLayout(bom, P) {
       },
     });
   }
-  const hw = bom.lines.filter((x) => x.section === 'Fasteners & hardware');
+  const hw = bom.lines.filter((x) => x.section === 'Fasteners & hardware' || x.key === 'sealant' || x.key === 'tieWire');
   if (hw.length) {
     const lb = hw.reduce((s, l) => s + l.lb, 0);
     const n = Math.max(1, Math.ceil(lb / 45));
     gens.push({
       name: 'Hardware cartons', qty: `${n} cartons`, L: n * 17, Wd: 12, H: 10, lb,
       draw(x, z) {
-        for (let i = 0; i < n; i++) box(x + i * 17, x + i * 17 + 16, 0, 10, z, z + 12, 'plyWall', 'Carton: nails, fasteners, bolts, ties, hinges', '');
+        for (let i = 0; i < n; i++) box(x + i * 17, x + i * 17 + 16, 0, 10, z, z + 12, 'plyWall', 'Carton: nails, fasteners, anchors, ties, hinges, sealant, tie wire', '');
       },
     });
   }

@@ -90,3 +90,12 @@ export function cylGeometry(r, h) {
   for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * (2 * Math.PI * r) / 24, uv.getY(i) * h / 24);
   return g;
 }
+
+// Extruded polygon (pts in the shape's x/y plane, extruded along +z).
+export function prismGeometry(pts, depth) {
+  const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+  const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false });
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 48, uv.getY(i) / 12);
+  return g;
+}

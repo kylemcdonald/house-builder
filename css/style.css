@@ -208,6 +208,10 @@ table.t input.price { width: 76px; text-align: right; padding: 3px 5px; border: 
 .note p { margin: 0; font-size: 13px; color: var(--muted); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
 
+@media (max-width: 1400px) and (min-width: 861px) {
+  .step-card { top: auto; bottom: 12px; }
+  .warnings { bottom: auto; top: 64px; }
+}
 @media (max-width: 860px) {
   body { overflow: auto; }
   .app { flex-direction: column; }

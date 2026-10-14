@@ -112,6 +112,15 @@ class Builder {
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis));
     return this.add({ kind: 'sheet', geom, pos: origin.toArray(), quat: q.toArray(), ...o });
   }
+  // Lumber cut to a profile drawn in the (z, y) plane, spanning x0..x1.
+  prism(pts, x0, x1, size, len, o) {
+    const q = new THREE.Quaternion().setFromAxisAngle(UP, Math.PI / 2);
+    const p = this.add({ kind: 'prism', pts: pts.map(([z, y]) => [-z, y]), depth: x1 - x0, pos: [x0, 0, 0], quat: q.toArray(), mat: 'wood', ...o });
+    p.lumber = size;
+    p.len = len;
+    this.lumber.push({ size, len, cat: o.cat || 'framing', label: o.name });
+    return p;
+  }
   cyl(x, z, r, y0, y1, o) {
     return this.add({ kind: 'cyl', r, h: y1 - y0, pos: [x, (y0 + y1) / 2, z], quat: null, ...o });
   }
@@ -216,7 +225,7 @@ export function design(P) {
   const yTop = y0 + H;
   const underside = (z) => yTop + (Math.min(z, D - z) - 3.5) * p;
   const rafterTop = (z) => underside(z) + rd / cos;
-  const roofTop = (z) => rafterTop(z) + 1.5;
+  const roofTop = (z) => rafterTop(z) + 1.5 / cos; // top of the purlins
 
   // ---------------------------------------------------------------- walls & openings
   const mkWall = (key, O, U, n, L, ua, ub, sideTop, step) => ({ key, O, U, n, L, ua, ub, top: () => H, sideTop, step, posts: [], openings: [] });
@@ -550,12 +559,14 @@ export function design(P) {
   const rafterOpt = { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: roofEx, name: `Rafter (${rafterSize})` };
   const nBack = V(0, cos, -sin);
   const nFront = V(0, cos, sin);
+  // Rafters: plumb cut at the tail (for the fascia) and at the ridge, with a
+  // birdsmouth notch where they sit on the wall plate.
+  const zr = D / 2 - 0.75;
+  const rafterLen = (zr + E) / cos;
+  const profile = [[-E, underside(-E)], [0, underside(0)], [0, yTop], [zr, underside(zr)], [zr, rafterTop(zr)], [-E, rafterTop(-E)]];
   for (const x of rafterXs) {
-    for (const [z0, z1, nrm] of [[-E, D / 2 - 0.75, nBack], [D + E, D / 2 + 0.75, nFront]]) {
-      const a = V(x, underside(z0), z0).addScaledVector(nrm, rd / 2);
-      const c = V(x, underside(z1), z1).addScaledVector(nrm, rd / 2);
-      b.member(a, c, rafterSize, UP, rafterOpt);
-    }
+    b.prism(profile, x - 0.75, x + 0.75, rafterSize, rafterLen, rafterOpt);
+    b.prism(profile.map(([z, y]) => [D - z, y]).reverse(), x - 0.75, x + 0.75, rafterSize, rafterLen, rafterOpt);
   }
   const ridgeTop = rafterTop(D / 2 - 0.75);
   for (const [s, e] of splitRange(0, W, rafterXs, 192)) {
@@ -588,7 +599,7 @@ export function design(P) {
       for (const [xa, xb] of splitRange(-R, W + R, rafterXs, 192)) {
         const a = V(xa, y, z).addScaledVector(sl.nrm, 0.75);
         const c = V(xb, y, z).addScaledVector(sl.nrm, 0.75);
-        b.member(a, c, '2x4', upDir, { cat: 'framing', group: 'purlins', step: STEP.PURLINS, ex: [0, 5 * EX, 0], name: 'Purlin (2x4 flat)', flat: true });
+        b.member(a, c, '2x4', upDir, { cat: 'framing', group: 'purlins', step: STEP.PURLINS, ex: [0, 5 * EX, 0], name: 'Purlin (2x4 flat)' });
       }
     }
     const zf = sl.zt;
@@ -620,7 +631,7 @@ export function design(P) {
       if (wi < 4) continue;
       run.forEach((pc, j) => {
         const z = zs + sl.dir * pc.start * cos;
-        const o = V(xAxis.x > 0 ? xi : xi + wi, roofTop(z), z).addScaledVector(zAxis, 0.12 + (i % 2) * 0.08 + j * 0.12);
+        const o = V(xAxis.x > 0 ? xi : xi + wi, roofTop(z), z).addScaledVector(zAxis, 0.3 + (i % 2) * 0.1 + j * 0.15);
         b.sheet(o, xAxis, yAxis, zAxis, { w: wi, h: pc.len, corr: CORR }, {
           mat: tinMat, name: tinName, info: `cut length ${ftin(pc.len)}`, group: 'roofing', step: STEP.ROOFING,
           ex: [zAxis.x * EX, 7 * EX + zAxis.y * EX, zAxis.z * EX],
@@ -635,7 +646,7 @@ export function design(P) {
     const yAxis = V(0, sin, sl.dir * cos);
     const zAxis = sl.nrm.clone();
     const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis);
-    const o = V(xAxis.x > 0 ? -R : W + R, ridgeY, D / 2).addScaledVector(yAxis, -7).addScaledVector(zAxis, 0.9);
+    const o = V(xAxis.x > 0 ? -R : W + R, ridgeY, D / 2).addScaledVector(yAxis, -7).addScaledVector(zAxis, 1.3);
     b.sheet(o, xAxis, yAxis, zAxis, { w: W + 2 * R, h: 7, corr: null }, { mat: tinMat, name: 'Ridge cap', group: 'roofing', step: STEP.ROOFING, ex: [0, 8.5 * EX, 0] });
   }
   const ridgePieces = Math.ceil((W + 2 * R) / (120 - 6));

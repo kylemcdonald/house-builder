@@ -6,7 +6,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { makeMaterials, groundTextureRepeat } from './materials.js';
-import { boxGeometry, sheetGeometry, cylGeometry } from './geometry.js';
+import { boxGeometry, sheetGeometry, cylGeometry, prismGeometry } from './geometry.js';
 import { ftin } from './format.js';
 
 function gradientTexture(top, bottom) {
@@ -157,12 +157,16 @@ export class Viewer {
 
     if (!realistic) {
       this.scene.background = gradientTexture('#cfe3f3', '#f5f8fa');
-      this.env.add(new THREE.HemisphereLight(0xffffff, 0xb8b0a0, 1.7));
-      const d = new THREE.DirectionalLight(0xffffff, 1.5);
-      d.position.set(-0.6, 1, 0.8);
+      // SketchUp-style lighting: a key light that follows the camera, so
+      // every wall you look at is lit from the side and its relief reads.
+      this.env.add(new THREE.HemisphereLight(0xffffff, 0xb8b0a0, 1.25));
+      const d = new THREE.DirectionalLight(0xffffff, 1.9);
       this.env.add(d);
+      this.env.add(d.target);
+      this.headLight = d;
       this.composer = null;
     } else {
+      this.headLight = null;
       const sun = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(40), THREE.MathUtils.degToRad(140));
       // equirectangular gradient sky, used for the background and reflections
       const skyTex = skyTexture(sun);
@@ -250,6 +254,7 @@ export class Viewer {
       if (p.kind === 'box') geo = boxGeometry(p.size, p.id);
       else if (p.kind === 'sheet') geo = sheetGeometry(p.geom);
       else if (p.kind === 'cyl') geo = cylGeometry(p.r, p.h);
+      else if (p.kind === 'prism') geo = prismGeometry(p.pts, p.depth);
       else continue;
       const mat = this.M[p.mat] || this.M.wood;
       const mesh = new THREE.Mesh(geo, mat);
@@ -410,6 +415,15 @@ export class Viewer {
 
   tick() {
     this.controls.update();
+    if (this.headLight) {
+      // light from above and to the left of the viewer
+      const cam = this.camera;
+      const fwd = this.controls.target.clone().sub(cam.position).normalize();
+      const right = new THREE.Vector3().crossVectors(fwd, cam.up).normalize();
+      const dir = fwd.clone().multiplyScalar(-1).addScaledVector(right, -0.9).add(new THREE.Vector3(0, 1.1, 0)).normalize();
+      this.headLight.target.position.copy(this.controls.target);
+      this.headLight.position.copy(this.controls.target).addScaledVector(dir, 1000);
+    }
     if (this.animT0) {
       this.applyState();
       if (performance.now() - this.animT0 > 750) this.animT0 = null;

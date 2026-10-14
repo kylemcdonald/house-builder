@@ -6,7 +6,6 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { GTAOPass } from 'three/addons/postprocessing/GTAOPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { makeMaterials, TINT } from './materials.js';
-import { palmGrove } from './scenery.js';
 import { boxGeometry, sheetGeometry, cylGeometry, prismGeometry, hardwareGeometry } from './geometry.js';
 import { ftin } from './format.js';
 
@@ -132,8 +131,7 @@ function hash(n) {
 }
 
 export class Viewer {
-  constructor(container, { tooltip = true, scenery = false } = {}) {
-    this.scenery = scenery;
+  constructor(container, { tooltip = true } = {}) {
     this.container = container;
     this.mode = 'sketch';
     this.explode = 0;
@@ -159,6 +157,8 @@ export class Viewer {
     this.camera.position.set(400, 260, 500);
     this.controls = new OrbitControls(this.camera, r.domElement);
     this.controls.enableDamping = true;
+    this.controls.addEventListener('change', () => this.invalidate());
+    this.dirty = true;
     this.controls.maxPolarAngle = Math.PI * 0.495;
 
     this.root = new THREE.Group();
@@ -175,7 +175,11 @@ export class Viewer {
       this.tip.className = 'tooltip';
       container.appendChild(this.tip);
       this.ray = new THREE.Raycaster();
-      r.domElement.addEventListener('pointermove', (e) => this.onHover(e));
+      r.domElement.addEventListener('pointermove', (e) => {
+        // raycasting thousands of parts is costly: at most once per frame
+        if (!this.hoverEv) requestAnimationFrame(() => { this.onHover(this.hoverEv); this.hoverEv = null; });
+        this.hoverEv = e;
+      });
       r.domElement.addEventListener('pointerleave', () => (this.tip.style.display = 'none'));
     }
 
@@ -191,6 +195,7 @@ export class Viewer {
   }
 
   resize() {
+    this.invalidate();
     const w = this.container.clientWidth || 1;
     const h = this.container.clientHeight || 1;
     this.renderer.setSize(w, h);
@@ -208,13 +213,16 @@ export class Viewer {
     this.scene.environment = null;
     this.scene.fog = null;
     this.sky = null;
-    this.grove = null;
     this.sun = null;
     const r = this.renderer;
     const realistic = this.mode === 'real';
     r.toneMapping = realistic ? THREE.NeutralToneMapping : THREE.NoToneMapping;
     r.toneMappingExposure = realistic ? EXPOSURE : 1;
     r.shadowMap.enabled = realistic;
+    // the sun never moves, so the shadow map is redrawn only when parts do
+    r.shadowMap.autoUpdate = false;
+    r.shadowMap.needsUpdate = true;
+    this.invalidate();
     this.M = makeMaterials(realistic ? 'real' : 'sketch');
 
     let groundGeo;
@@ -271,14 +279,16 @@ export class Viewer {
       try {
         const w = this.container.clientWidth || 1;
         const h = this.container.clientHeight || 1;
-        const pr = Math.min(window.devicePixelRatio, 2);
+        // 1.5× with 4× MSAA is indistinguishable from 2× on a laptop screen
+        // and draws 44% fewer pixels through the AO and output passes
+        const pr = Math.min(window.devicePixelRatio, 1.5);
         // multisampled HDR target: the corrugations alias badly without it
         const rt = new THREE.WebGLRenderTarget(w * pr, h * pr, { type: THREE.HalfFloatType, samples: 4 });
         const comp = new EffectComposer(r, rt);
         comp.addPass(new RenderPass(this.scene, this.camera));
         const ao = new GTAOPass(this.scene, this.camera, w, h);
-        ao.updateGtaoMaterial({ radius: 30, distanceExponent: 1.6, thickness: 8, scale: 1.0, samples: 16 });
-        ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 16 });
+        ao.updateGtaoMaterial({ radius: 30, distanceExponent: 1.6, thickness: 8, scale: 1.0, samples: 12 });
+        ao.updatePdMaterial({ lumaPhi: 10, depthPhi: 2, normalPhi: 3, radius: 6, rings: 2, samples: 8 });
         ao.blendIntensity = 1.0;
         comp.addPass(ao);
         comp.addPass(new OutputPass());
@@ -306,15 +316,8 @@ export class Viewer {
     this.sun.position.copy(c).addScaledVector(dir, 1500);
     const u = this.M.ground.userData.uHouse;
     if (u) u.value.set(min[0], min[2], max[0], max[2]);
-    if (this.scenery) {
-      const key = [min[0], min[2], max[0], max[2]].map(Math.round).join();
-      if (key !== this.groveKey || !this.grove || this.grove.parent !== this.env) {
-        if (this.grove) this.env.remove(this.grove);
-        this.grove = palmGrove(this.bounds);
-        this.groveKey = key;
-        this.env.add(this.grove);
-      }
-    }
+    this.renderer.shadowMap.needsUpdate = true;
+    this.invalidate();
   }
 
   setMode(mode) {
@@ -434,6 +437,7 @@ export class Viewer {
   }
 
   setDims(on) {
+    this.invalidate();
     this.showDims = on;
     this.dimGroup.traverse((o) => { if (o.isCSS2DObject) o.element.style.display = on ? '' : 'none'; });
     this.dimGroup.visible = on;
@@ -460,6 +464,8 @@ export class Viewer {
   }
 
   applyState(materials = false) {
+    this.invalidate();
+    this.renderer.shadowMap.needsUpdate = true;
     const s = this.step;
     const done = s >= this.maxStep;
     const now = performance.now();
@@ -540,7 +546,10 @@ export class Viewer {
       const inside = b && c.x > b.min[0] + 50 && c.x < b.max[0] - 50 && c.z > b.min[2] + 50 && c.z < b.max[2] - 50 && c.y < b.max[1] * 0.8;
       const target = EXPOSURE * (inside && this.step >= this.maxStep ? 2.6 : 1);
       const r = this.renderer;
-      r.toneMappingExposure += (target - r.toneMappingExposure) * (Math.abs(target - r.toneMappingExposure) < 0.01 ? 1 : 0.08);
+      if (r.toneMappingExposure !== target) {
+        r.toneMappingExposure += (target - r.toneMappingExposure) * (Math.abs(target - r.toneMappingExposure) < 0.01 ? 1 : 0.08);
+        this.dirty = true;
+      }
     }
     if (this.headLight) {
       // light from above and to the left of the viewer
@@ -555,9 +564,16 @@ export class Viewer {
       this.applyState();
       if (performance.now() - this.animT0 > 750) this.animT0 = null;
     }
+    // only draw when something changed: an idle view costs nothing
+    if (!this.dirty) return;
+    this.dirty = false;
     if (this.composer && this.mode === 'real') this.composer.render();
     else this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
+  }
+
+  invalidate() {
+    this.dirty = true;
   }
 
   screenshot() {

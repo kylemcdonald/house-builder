@@ -24,7 +24,7 @@ Every dimension of the existing concrete can be set to match what was actually p
   - procedural, non-repeating materials: treated pine with real grain and knots, weathered concrete with rain streaks and splash-back grime, a troweled slab, spangled galvanised steel, lauan plywood, coral sand and grass
   - per-board and per-sheet colour variation
   - a tropical sky with clouds that also lights the scene, sun shadows, ambient occlusion and haze toward the horizon
-  - coconut palms around the site, and exposure that adapts when you look around inside
+  - exposure that adapts when you look around inside
 - **Gable roof** in **metal or PVC "tinroof"**; outer walls in the same material and inner walls in plywood.
 - **Doors and windows**: in a wall × bay grid, tick the bays that have a door gap in the pony wall. A second grid closes chosen gaps with framing, corrugated sheet and plywood instead of a door. Windows are spread along every wall no further apart than a maximum spacing you choose.
 - **Existing concrete inputs**: column count and size, pony wall height and thickness, and ring beam height. There is an optional new floor slab reinforced with 6″ × 6″ galvanised wire mesh over a plastic underlay.
@@ -59,7 +59,7 @@ python3 -m http.server 8000
 | `js/catalog.js` | Shop prices, lumber and plywood sizes, weights |
 | `js/bom.js` | Cut optimisation, sheet packing, pricing |
 | `js/shipping.js` | Flat-pack bundle layout |
-| `js/viewer.js`, `js/materials.js`, `js/geometry.js`, `js/scenery.js` | Rendering |
+| `js/viewer.js`, `js/materials.js`, `js/geometry.js` | Rendering |
 | `js/main.js` | UI |
 
 This is a planning tool, not a stamped engineering design.

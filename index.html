@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polowat House Builder</title>
+  <meta name="description" content="Parametric raised-floor house designer with 3D model, construction sequence, shipping layout and bill of materials.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M3 15 16 5l13 10' fill='none' stroke='%23c2410c' stroke-width='3'/%3E%3Cpath d='M7 14v9h18v-9' fill='%23f5d0a9' stroke='%23333' stroke-width='2'/%3E%3Cpath d='M9 23v6M23 23v6' stroke='%23333' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true"><path d="M3 15 16 5l13 10" fill="none" stroke="currentColor" stroke-width="3"/><path d="M7 14v9h18v-9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M9 23v6M23 23v6" stroke="currentColor" stroke-width="2"/></svg>
+      <div>
+        <h1>Polowat House Builder</h1>
+        <p class="sub" id="subtitle">12' × 8' raised house</p>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="model">3D Model</button>
+      <button class="tab" data-tab="ship">Shipping Layout</button>
+      <button class="tab" data-tab="bom">Bill of Materials</button>
+      <button class="tab" data-tab="notes">Design Notes</button>
+    </nav>
+    <div class="total-chip" id="totalChip">—</div>
+  </header>
+
+  <main class="app">
+    <aside class="side" id="side">
+      <section class="group">
+        <h2>Size</h2>
+        <div class="field">
+          <label for="width">Width <span class="val" id="widthVal"></span></label>
+          <input type="range" id="width" min="8" max="32" step="0.5">
+        </div>
+        <div class="field">
+          <label for="depth">Depth <span class="val" id="depthVal"></span></label>
+          <input type="range" id="depth" min="6" max="24" step="0.5">
+        </div>
+      </section>
+      <section class="group">
+        <h2>Style</h2>
+        <div class="field">
+          <label>Roof</label>
+          <div class="seg" data-param="roof">
+            <button data-v="gable">Two slopes (gable)</button>
+            <button data-v="shed">Single slope</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Roof &amp; outer walls</label>
+          <div class="seg" data-param="cladding">
+            <button data-v="metal">Metal tinroof</button>
+            <button data-v="pvc">PVC tinroof</button>
+          </div>
+        </div>
+      </section>
+      <div id="advanced"></div>
+      <section class="group buttons">
+        <button id="resetBtn" class="btn">Reset to defaults</button>
+        <button id="shareBtn" class="btn">Copy share link</button>
+      </section>
+    </aside>
+
+    <section class="content">
+      <!-- 3D model -->
+      <div class="pane active" id="pane-model">
+        <div class="viewport" id="viewport">
+          <div class="toolbar">
+            <div class="seg small" id="renderSeg">
+              <button data-v="sketch" class="on">SketchUp</button>
+              <button data-v="real">Realistic</button>
+            </div>
+            <label class="explode">Explode <input type="range" id="explode" min="0" max="1" step="0.01" value="0"></label>
+            <label class="chk"><input type="checkbox" id="dimsChk" checked> Dimensions</label>
+            <div class="views">
+              <button data-view="iso" title="3D view">3D</button>
+              <button data-view="front">Front</button>
+              <button data-view="right">Side</button>
+              <button data-view="top">Top</button>
+            </div>
+          </div>
+          <div class="step-card" id="stepCard">
+            <div class="step-num" id="stepNum"></div>
+            <h3 id="stepTitle"></h3>
+            <p id="stepText"></p>
+          </div>
+          <div class="warnings" id="warnings"></div>
+        </div>
+        <div class="playbar">
+          <button id="prevStep" class="icon" title="Previous step">◀</button>
+          <button id="playBtn" class="icon play" title="Play">▶</button>
+          <button id="nextStep" class="icon" title="Next step">▶|</button>
+          <input type="range" id="stepSlider" min="0" max="18" step="1">
+          <div class="step-ticks" id="stepTicks"></div>
+        </div>
+      </div>
+
+      <!-- shipping -->
+      <div class="pane" id="pane-ship">
+        <div class="ship-wrap">
+          <div class="viewport" id="shipViewport">
+            <div class="toolbar">
+              <div class="seg small" id="renderSeg2">
+                <button data-v="sketch" class="on">SketchUp</button>
+                <button data-v="real">Realistic</button>
+              </div>
+            </div>
+          </div>
+          <div class="ship-table" id="shipTable"></div>
+        </div>
+      </div>
+
+      <!-- BOM -->
+      <div class="pane scroll" id="pane-bom">
+        <div class="doc" id="bomDoc"></div>
+      </div>
+
+      <!-- notes -->
+      <div class="pane scroll" id="pane-notes">
+        <div class="doc" id="notesDoc"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

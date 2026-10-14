@@ -14,12 +14,12 @@ export const DEFAULTS = {
   depth: 17, // ft
   cladding: 'metal', // 'metal' | 'pvc'
   // existing concrete frame
-  floorAbove: 6, // finished floor above grade, in
+  floorAbove: 7, // finished floor above grade, in
   ponyT: 6, // perimeter outline / pony wall thickness, in
   ponyH: 24, // pony wall height above the floor, in
   colSize: 9, // square concrete columns, in
   midPosts: 2, // columns between the corners on each wall
-  ringBottom: 84, // underside of the ring beam above the floor, in
+  ringBottom: 94, // underside of the ring beam above the floor, in
   ringH: 9, // ring beam height, in
   // new floor slab inside the outline
   floorSlab: 'yes',
@@ -27,23 +27,23 @@ export const DEFAULTS = {
   rebarSpacing: 24,
   // roof
   pitch: 4,
-  eave: 12,
-  rake: 6,
+  eave: 24,
+  rake: 18,
   studSpacing: 24,
   rafterSpacing: 24,
-  purlinSpacing: 24,
+  purlinSpacing: 32,
   wallPly: 'ply14',
   // door per bay between columns, per wall (bays left→right seen from outside):
   // front-back-left-right, '1' = door
   doorBays: '011-100-010-100',
   // door gaps to close up with framing, tin and plywood instead of a door
-  coverBays: '000-000-000-000',
-  doorW: 32,
+  coverBays: '000-100-010-000',
+  doorW: 36,
   doorH: 80,
-  winSpacing: 10, // ft
+  winSpacing: 11.5, // ft
   windowW: 3,
   windowH: 4,
-  sill: 30,
+  sill: 22,
   tinCover: 30,
   ovTin: 10,
   ovPly: 10,
@@ -276,6 +276,7 @@ export function design(P) {
   const leafH = doorRO.h - 1.5;
   if (leafH < P.doorH - 0.01) warnings.push(`The ring beam is low: doors can only be ${inch(leafH)} tall.`);
   let sill = Math.max(P.sill, PH + 3);
+  if (P.sill < PH + 3) warnings.push(`Window sill raised from ${inch(P.sill)} to ${inch(sill)} so the window sits above the ${inch(PH)} pony wall and its 2x4 plate.`);
   if (sill + winRO.h + 1.5 > Rb - 1.5) sill = Rb - 3 - winRO.h;
   if (sill < PH + 3) warnings.push(`A ${P.windowH}' louvre doesn't fit between the pony wall and the ring beam.`);
   const S = P.winSpacing * 12;

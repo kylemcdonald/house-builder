@@ -671,11 +671,23 @@ export function design(P) {
   }
   rafterXs.forEach((x, i) => {
     if (i === 0 || i === rafterXs.length - 1 || i % 2 === 0) return;
-    for (const [s, e] of splitRange(0, D, [D / 2 + 12], 192)) {
+    const pieces = splitRange(0, D, [D / 2 + 12], 192);
+    for (const [s, e] of pieces) {
       b.lumberBox('2x4', x + 0.75, x + 2.25, yTop, yTop + 3.5, s, e, { ...rafterOpt, name: 'Ceiling tie' });
       // face-nailed to the rafter at the wall
       const zz = s < 1 ? [2.5, 6, 9.5] : e > D - 1 ? [D - 2.5, D - 6, D - 9.5] : [];
       zz.forEach((z, k) => b.fasten('nail16', V(x + 2.25, yTop + 1.75 + (k % 2 ? 0.8 : -0.8), z), V(1, 0, 0), roofNail));
+    }
+    // butt joints are spliced with a 4' 2x4 scab nailed across the joint
+    for (let k = 1; k < pieces.length; k++) {
+      const j = pieces[k][0];
+      const half = Math.min(24, j - 12, D - 12 - j);
+      b.lumberBox('2x4', x + 2.25, x + 3.75, yTop, yTop + 3.5, j - half, j + half, { ...rafterOpt, name: 'Ceiling tie splice (2x4 scab)' });
+      for (const sgn of [-1, 1]) {
+        for (const dz of [2.5, half * 0.45, half - 2.5]) {
+          for (const dy of [1, 2.5]) b.fasten('nail16', V(x + 3.75, yTop + dy, j + sgn * (dz + (dy > 2 ? 1.5 : 0))), V(1, 0, 0), roofNail);
+        }
+      }
     }
   });
 
@@ -1061,7 +1073,7 @@ export function design(P) {
     { title: 'Wall plates', text: `Bolt a 2x6 wall plate flat on top of the ring beam with 1/2" wedge anchors about every 32" (${wedge} anchors) — the rafters sit on this. In every bay, fasten a 2x4 bottom plate to the pony wall and a 2x4 top plate to the underside of the ring beam, using concrete screws (drill with a hammer drill). Put a strip of plastic or bitumen under any wood that touches concrete.` },
     { title: 'Infill the long walls', text: `Frame each bay between the columns. Studs at ${inch(P.studSpacing)} on centre are screwed to the columns at each end, with ${blockLevels.length} row${blockLevels.length > 1 ? 's' : ''} of flat blocking for the siding. Front wall: ${count('front', 'door')} doors, ${count('front', 'window')} windows. Back wall: ${count('back', 'door')} door${count('back', 'door') === 1 ? '' : 's'}, ${count('back', 'window')} windows. The ring beam carries the roof, so openings need only a flat 2x4 head, not a header.${covText}` },
     { title: 'Infill the end walls', text: `Frame the end-wall bays the same way: ${count('left', 'door')} door and ${count('left', 'window')} windows in each. The louvre rough opening is ${ftin(winRO.w)} × ${ftin(winRO.h)}, with the sill at ${ftin(sill)}. Windows are never more than ${ftin(S)} apart.` },
-    { title: 'Roof framing', text: `Gable roof at ${P.pitch}:12. Set the 2x6 ridge on temporary props, then fit ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre. Each rafter is birdsmouthed onto the wall plate, plumb-cut at the tail for the fascia, and tied down with a hurricane tie. Add 2x4 ceiling ties on alternate pairs, and frame the gable ends above the ring beam with studs.` },
+    { title: 'Roof framing', text: `Gable roof at ${P.pitch}:12. Set the 2x6 ridge on temporary props, then fit ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre. Each rafter is birdsmouthed onto the wall plate, plumb-cut at the tail for the fascia, and tied down with a hurricane tie. Add 2x4 ceiling ties on alternate pairs, nailed to the rafters at each wall${D > 192 ? '. A tie is longer than a 16\' board, so it comes in two pieces butted together, with a 4\' 2x4 scab nailed across the joint (12 nails, 6 each side)' : ''}. Frame the gable ends above the ring beam with studs.` },
     { title: 'Purlins', text: `Nail 2x4 purlins flat across the rafters, ${slopes.map((s) => s.purlins).join(' + ')} rows at no more than ${inch(P.purlinSpacing)} apart, overhanging the gable ends by ${inch(R)}.` },
     { title: 'Roofing', text: `Lay ${tinPieces.filter((t) => t.use === 'roof').length} pieces of ${clad === 'pvc' ? 'PVC' : 'galvanised metal'} sheet, starting at the end away from the prevailing wind. Lap one corrugation at the sides and ${inch(LAP)} at any end joints, and fasten through the crests. Finish with the ridge cap. Each inch of rain on the ${num(roofPlanFt2)} sq ft roof yields about ${num(rainGal)} gallons.` },
     { title: 'Siding', text: `Clad each bay with vertical ${clad === 'pvc' ? 'PVC' : 'metal'} sheets from just below the pony-wall top up to the ring beam, lapping 1-1/2" over the concrete so water runs off. Closed door gaps get a lower sheet tucked behind the panel above. Clad the gable triangles above the ring beam too (${tinPieces.filter((t) => t.use === 'siding').length} pieces in total). Seal the joints where tin meets concrete.` },

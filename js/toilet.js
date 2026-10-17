@@ -58,7 +58,7 @@ export const TDEFAULTS = {
 
 export const TSTEP = {
   SITE: 0, DRAIN: 1, FORMS: 2, SLAB: 3, BLOCKS: 4, FRAME: 5, ROOF_FRAME: 6, PURLINS: 7,
-  ROOFING: 8, SIDING: 9, SCREENS: 10, DOOR: 11, TOILET: 12, WASTE: 13, DONE: 14,
+  ROOFING: 8, SCREENS: 9, SIDING: 10, DOOR: 11, TOILET: 12, WASTE: 13, DONE: 14,
 };
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -100,7 +100,7 @@ export function toiletDesign(P) {
   const upSlope = V(0, sin, cos);
 
   // ---------------------------------------------------------------- walls
-  const mkWall = (key, O, U, n, L) => ({ key, O, U, n, L });
+  const mkWall = (key, O, U, n, L) => ({ key, O, U, n, L, frame: [], bolts: [], blocks: [] });
   const walls = {
     back: mkWall('back', V(W, y0, 0), V(-1, 0, 0), V(0, 0, -1), W),
     front: mkWall('front', V(0, y0, D), V(1, 0, 0), V(0, 0, 1), W),
@@ -353,6 +353,7 @@ export function toiletDesign(P) {
           const len = rem <= BL ? rem : rem - BL - BJ < 4 ? (rem - BJ) / 2 : BL;
           boxW(w, u, u + len, k * 8 + BJ, k * 8 + 8, 0, bt, { ...bo, info: len < BL - 0.1 ? `cut to ${ftin(len)}` : 'whole block' });
           blockPieces.push({ len, label: 'Wall block' });
+          w.blocks.push({ course: k, u, len });
           u += len + BJ;
         }
       }
@@ -388,10 +389,12 @@ export function toiletDesign(P) {
     const bolts = { group: 'wall', step: TSTEP.FRAME, ex: wallEx(w, 0.6, 1.5), name: '1/2" anchor bolt, nut & washer (set in a grouted cell)' };
     for (const [s, e] of plateRuns[w.key]) {
       lumberW(w, '2x4', s, e, PH, PH + 1.5, 0, FW, { ...fo, name: 'Bottom plate on the blocks (2x4)' });
+      w.frame.push({ name: 'Bottom plate', u0: s, u1: e, v0: PH, v1: PH + 1.5 });
       // a bolt 6" from each end and at most 32" apart, clear of the studs
       for (let u of spread(s + 3, e - 3, Math.max(2, Math.ceil((e - s - 12) / 32) + 1), 3)) {
         for (let i = 0; i < 4 && studU[w.key].some((x) => Math.abs(x - u) < 1.7); i++) u += u + 2.6 < e ? 2.6 : -2.6;
         fastW(w, 'wedge', u, PH + 1.5, FW / 2, UP, bolts);
+        w.bolts.push(u);
         addCell(w, u);
       }
     }
@@ -418,7 +421,10 @@ export function toiletDesign(P) {
     const side = w.key === 'left' || w.key === 'right';
     const fo = { cat: 'framing', group: 'wall', step: TSTEP.FRAME, ex: wallEx(w, 0.6, 1.5) };
     const nailO = { ...fo, name: '16d 3-1/2" galv. framing nail' };
-    const add = (name, size, u0, u1, v0, v1, d0 = 0, d1 = FW) => lumberW(w, size, u0, u1, v0, v1, d0, d1, { ...fo, name });
+    const add = (name, size, u0, u1, v0, v1, d0 = 0, d1 = FW) => {
+      if (d0 < 1) w.frame.push({ name, u0, u1, v0, v1 }); // (a doubled header is drawn once)
+      return lumberW(w, size, u0, u1, v0, v1, d0, d1, { ...fo, name });
+    };
     const vbot = PH + 1.5;
     const topOf = side ? (u) => sidePlateTop(w, u) - 1.5 / cos : () => (w.key === 'front' ? Hf : P.lowH) - 1.5;
     const rows = [PH + 0.75];
@@ -426,6 +432,8 @@ export function toiletDesign(P) {
     if (side) {
       const pt = (u) => toW(w, u, sidePlateTop(w, u) - 0.75 / cos, FW / 2);
       b.member(pt(FW), pt(D - FW), '2x4', w.n.clone().negate(), { ...fo, name: 'Raked top plate (2x4)' });
+      // top edge of the plate at each end, measured from the floor
+      w.rake = { u0: FW, u1: D - FW, top0: sidePlateTop(w, FW), top1: sidePlateTop(w, D - FW), drop: 1.5 / cos };
     } else {
       for (const [s, e] of splitRange(0, W, [], 192)) add('Top plate (2x4)', '2x4', s, e, topOf(0), topOf(0) + 1.5);
       rows.push(topOf(0) + 0.3);
@@ -617,9 +625,12 @@ export function toiletDesign(P) {
   }
 
   // ---------------------------------------------------------------- siding
+  const sidingLog = [];
   const hang = (w, ua, ub, vbase, topFn, holes0, label, rows) => {
     const L = ub - ua;
     const nc = Math.max(1, Math.ceil((L - (tinW - P.tinCover)) / P.tinCover));
+    const rec = { wall: w.key, label, ua, ub, vbase, n: nc, pieces: [], rows };
+    sidingLog.push(rec);
     for (let i = 0; i < nc; i++) {
       const ui = ua + i * P.tinCover;
       const wi = Math.min(tinW, ub - ui);
@@ -630,6 +641,7 @@ export function toiletDesign(P) {
       if (Lc < 2) continue;
       sheetRun(Lc).forEach((pc, j) => {
         const base = vbase + pc.start;
+        rec.pieces.push({ col: i, u: ui, w: wi, len: pc.len, stock: pc.stock, lo: topFn(ui) - base, hi: topFn(ui + wi) - base });
         const holes = holes0.map((o) => ({ x0: o.u0 - ui, x1: o.u1 - ui, y0: o.v0 - base, y1: o.v1 - base }));
         const profile2 = (x) => topFn(ui + x) - base;
         const so = 0.15 + (i % 2) * 0.08 + j * 0.12;
@@ -725,8 +737,9 @@ export function toiletDesign(P) {
     lumberW(w, '1x4', lu0 + 1, lu1 - 1, vv, vv + 3.5, 1.0, 1.75, bo);
     for (const bu of boards) for (const k of [-1.3, 1.3]) fastW(w, 'nail8', bu + k, vv + 1.75 + k * 0.4, 0.25, w.n, doorNail);
   }
-  const ba = [lu1 - 3, lv0 + 9.5 + 1.75];
-  const bc = [lu0 + 3, lv1 - 9.5 - 1.75];
+  // the brace rises from the bottom hinge to the latch side, in compression
+  const ba = [lu0 + 3, lv0 + 9.5 + 1.75];
+  const bc = [lu1 - 3, lv1 - 9.5 - 1.75];
   b.member(toW(w, ba[0], ba[1], 1.375), toW(w, bc[0], bc[1], 1.375), '1x4', w.n, { ...bo, flat: true, name: 'Door brace (1x4)' });
   for (const bu of boards) {
     const t = (bu - ba[0]) / (bc[0] - ba[0]);
@@ -871,8 +884,8 @@ export function toiletDesign(P) {
     { title: 'Roof framing', text: `Set ${rafterXs.length} ${rafterSize} rafters at ${inch(P.studSpacing)}, birdsmouthed onto both top plates so the roof falls ${P.pitch}:12 toward the water and away from the door. Tie each end down with a hurricane tie (${ties} in all). Fit 2x4 frieze blocks between the rafters on both walls to close the eaves, then nail on the 1x6 fascia. Overhangs: ${inch(E)} at the eaves, ${inch(R)} at the sides.` },
     { title: 'Purlins', text: `${purlinZ.length} rows of flat 2x4 purlins, no more than ${inch(P.purlinSpacing)} apart, with one directly over each wall so the eaves can be sealed. Block between the purlins over the two end rafters.` },
     { title: 'Roofing', text: `${tinPieces.filter((t) => t.use === 'roof').length} ${clad === 'pvc' ? 'PVC' : 'galvanised'} sheets, ${ftin(Ls)} long, one length from eave to eave with no end laps. Screw through the crests into every purlin. Fill the crests over the two eave purlins with expanding foam so insects can't get in under the sheets.` },
-    { title: 'Siding', text: `Clad the walls with vertical sheets from 1-1/2" below the top of the blocks (so rain runs off onto the block, not into the wood) up to the roof. On the side walls, cut out a ${inch(vh)}-high band for the vents. ${tinPieces.filter((t) => t.use === 'siding').length} pieces in all.` },
     { title: 'Vent screens', text: `The vent band on each side wall is ${ftin(D - 2 * FW)} long and ${inch(vh)} high, sill at ${ftin(vb)}. Air comes in on one side and out the other, and the roof overhang keeps most rain out. Staple fiberglass insect screen over the band on the outside of the framing, so the tin clamps its edges. Fiberglass doesn't rust in salt air; aluminium and steel screen don't last.` },
+    { title: 'Siding', text: `Clad the walls with vertical sheets from 1-1/2" below the top of the blocks (so rain runs off onto the block, not into the wood) up to the roof. On the side walls, cut out a ${inch(vh)}-high band for the vents. ${tinPieces.filter((t) => t.use === 'siding').length} pieces in all.` },
     { title: 'Door', text: `A ${inch(P.doorW)} × ${ftin(leafH)} board door hung on three T-hinges outside, so it swings out and leaves the room clear. No lock: a pull and a hook and eye outside to keep it shut in the wind, and a barrel bolt inside for privacy.` },
     { title: 'Toilet and vent', text: `Bed the pour-flush bowl on mortar over the closet flange. Run the 2" vent up the back wall and through the roof with a rubber pipe boot, ending 12" above the roof with a screened cap. Flushing: a bucket of seawater (about ${P.flushGal} gal) poured quickly into the bowl. A 55-gal drum outside holds the day's water.` },
     pit
@@ -900,6 +913,13 @@ export function toiletDesign(P) {
       mesh: meshStrips, screen: screenStrips, mainPipes, ventPipes, fittings,
       ties, bolts: nBolts, n16: hc('nail16'), n8: hc('nail8'), nTie: hc('tieNail'), roofFast: hc('roofScrew'), screws: hc('conScrew'),
       foamFt: (2 * (W + 2 * R)) / 12 + 6,
+    },
+    // positions the step-by-step guide draws and measures from
+    g: {
+      y0, T, W, D, Ds, bt, PH, FW, E, R, p, cos, pitch: P.pitch, yb, yf, Hf, rd, rafterSize, rafterLen, rafterXs, purlinZ,
+      r0, r1, hRO, leafH, doorRO, vb, vt, tx, zo, zv, zc, yd0, ydc, ventTop, straps, zShore, collars, outEnd, pitInfo, PIT, ROUGH_IN, SLOPE,
+      formH, layers, meshStrips, slabMeshDir: slabMesh.a ? 'z' : 'x', cells: cells.map((c) => ({ wall: c.w.key, u: c.u })), Ls, nCols, roofSheets, tinW, sidingLog, screenStrips,
+      walls: Object.fromEntries(Object.values(walls).map((w) => [w.key, { key: w.key, L: w.L, frame: w.frame, bolts: w.bolts, blocks: w.blocks, rake: w.rake || null }])),
     },
     info: {
       innerW, innerD, innerArea, Hf, lowH: P.lowH, vb, vt, rafterSize, nBlocks, cells: cells.length,

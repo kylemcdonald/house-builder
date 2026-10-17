@@ -31,6 +31,10 @@ Every dimension of the existing concrete can be set to match what was actually p
 - **All hardware is drawn**: framing nails and toenails, concrete screws, wedge anchors, hurricane ties, roofing screws on every purlin and girt, panel nails, casing nails, T-hinges, hasps and padlocks. The fastener counts in the bill of materials come from this hardware.
 - **Explode slider** that separates the building into its layers.
 - **Construction playback**: 13 steps, from the existing concrete through the floor, wall plates, infill walls, roof, siding, windows and doors, to the interior plywood. Each step has a written explanation that uses the real dimensions and quantities.
+- **Step-by-step guide**: written for someone who has never built anything. It covers tools, safety, the words used and the basic skills, then every stage in order, with "done" ticks kept in the browser. Every number comes from the current design. The pictures are:
+  - snapshots of the 3D model at each stage, wide views and close-ups, with the parts added in that step highlighted
+  - drawings made from the design: a plan of the frame, framing for each bay (identical bays drawn once) with where to mark and how long to cut every piece, a section through the wall, the rafter pattern and birdsmouth, the gable end, purlin spacing, sheet layouts and plywood layouts
+  - close-up diagrams of the techniques: nailing, concrete screws, wedge anchors, mixing concrete, sheet laps, hurricane ties, the door brace
 - **Shipping layout**: every purchased item laid flat in strapped bundles, with sizes, volume and weight for the ferry.
 - **Bill of materials** priced from the shop's written quote where it lists the item, and from the shop's price sign otherwise, plus 6% sales tax:
   - lumber is cut-optimised, and every board gets a cut diagram
@@ -56,6 +60,7 @@ The waste goes either to a **seawater outfall** or to a **pit**:
 - **Pit:** block-lined, with a concrete lid. The model shows groundwater standing in it when it is dug below the water table.
 
 The two designs are the top tabs (House and Toilet House), and each has its own row of pages underneath. The toilet house has its own 3D model with 13 construction steps and a "Site" view of the whole outfall. It also has:
+- a **Step-by-step** guide, from laying out the slab to the first flush. Its drawings include the drain under the slab, a slab plan with the flange and dowel positions, both block courses, every wall's framing with stud lengths, the rafter with its two birdsmouths, and the outfall or the pit
 - a **Waste system** page: how the outfall works, its numbers (flush water, how far each flush moves the water in the flooded pipe, how long waste stays in it), what makes it work, and a comparison of outfall, pit and the shoreline
 - a bill of materials with shipping bundles
 - design notes
@@ -87,6 +92,8 @@ python3 -m http.server 8000
 | `js/viewer.js`, `js/materials.js`, `js/geometry.js` | Rendering |
 | `js/toilet.js` | Toilet house: parameters → parts, steps and quantities |
 | `js/main.js`, `js/toilet-ui.js`, `js/fields.js`, `js/bomview.js`, `js/photos.js` | UI |
+| `js/guide-house.js`, `js/guide-toilet.js` | Step-by-step guides |
+| `js/guide.js`, `js/guide-svg.js`, `js/snap.js` | Guide layout, drawing kit, 3D snapshots |
 | `js/photo-data.js`, `img/items/` | Item photos and their sources |
 
 This is a planning tool, not a stamped engineering design.

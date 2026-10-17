@@ -9,6 +9,7 @@ import { renderBomDoc, bomTotal } from './bomview.js';
 import { TDEFAULTS } from './toilet.js';
 import { createToiletUI } from './toilet-ui.js';
 import { renderPhotos } from './photos.js';
+import { renderHouseGuide } from './guide-house.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -197,6 +198,7 @@ let SHIP = null;
 let step = STEP.DONE;
 let pending = false;
 let shipDirty = true;
+let guideDirty = true;
 let lastSize = '';
 
 function schedule() {
@@ -220,7 +222,9 @@ function regenerate() {
   viewer.setStep(step, STEP.DONE);
   viewer.setDims($('#dimsChk').checked);
   shipDirty = true;
+  guideDirty = true;
   if (houseOn('ship')) updateShip();
+  if (houseOn('guide')) updateGuide();
   updateStepUI();
   renderDoorGrid();
   renderBOM();
@@ -255,6 +259,14 @@ function updateShip() {
     renderShipTable();
     shipDirty = false;
   }
+}
+
+// the step-by-step guide is only rebuilt while it is on screen
+function updateGuide() {
+  // (also redrawn if its 3D pictures were interrupted by leaving the tab)
+  if (!D || (!guideDirty && $('#guideDoc').dataset.shots === 'done')) return;
+  guideDirty = false;
+  renderHouseGuide($('#guideDoc'), { d: D, P, bom: BOM });
 }
 
 // ------------------------------------------------------------ step playback
@@ -381,6 +393,7 @@ function showTab(m) {
   toilet.setActive(t);
   if (houseOn('ship')) requestAnimationFrame(() => { updateShip(); shipViewer.active = true; shipViewer.resize(); });
   if (houseOn('model')) requestAnimationFrame(() => viewer.resize());
+  if (houseOn('guide')) requestAnimationFrame(updateGuide);
   writeHash();
   updateHeader();
 }

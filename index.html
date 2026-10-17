@@ -79,6 +79,7 @@
       <div class="pane active" id="pane-house">
         <div class="subtabs seg small" id="houseTabs">
           <button data-sub="model" class="on">3D Model</button>
+          <button data-sub="guide">Step-by-step</button>
           <button data-sub="ship">Shipping Layout</button>
           <button data-sub="bom">Bill of Materials</button>
           <button data-sub="notes">Design Notes</button>
@@ -115,6 +116,11 @@
           </div>
         </div>
 
+        <!-- step-by-step guide -->
+        <div class="tpane scroll" id="hpane-guide">
+          <div class="doc" id="guideDoc"></div>
+        </div>
+
         <!-- shipping -->
         <div class="tpane" id="hpane-ship">
           <div class="ship-wrap">
@@ -145,6 +151,7 @@
       <div class="pane" id="pane-toilet">
         <div class="subtabs seg small" id="toiletTabs">
           <button data-sub="model" class="on">3D Model</button>
+          <button data-sub="guide">Step-by-step</button>
           <button data-sub="waste">Waste system</button>
           <button data-sub="bom">Bill of Materials</button>
           <button data-sub="notes">Design Notes</button>
@@ -181,6 +188,7 @@
             <div class="step-ticks" id="tStepTicks"></div>
           </div>
         </div>
+        <div class="tpane scroll" id="tpane-guide"><div class="doc" id="tGuideDoc"></div></div>
         <div class="tpane scroll" id="tpane-waste"><div class="doc" id="tWasteDoc"></div></div>
         <div class="tpane scroll" id="tpane-bom"><div class="doc" id="tBomDoc"></div></div>
         <div class="tpane scroll" id="tpane-notes"><div class="doc" id="tNotesDoc"></div></div>

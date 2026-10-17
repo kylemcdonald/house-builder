@@ -7,6 +7,7 @@ import { Viewer } from './viewer.js';
 import { buildFields, syncFields } from './fields.js';
 import { renderBomDoc, bomTotal } from './bomview.js';
 import { ftin, inch, money, num } from './format.js';
+import { renderToiletGuide } from './guide-toilet.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -91,6 +92,7 @@ export function createToiletUI(o) {
   let active = false;
   let pending = false;
   let playTimer = null;
+  let guideDirty = true;
 
   buildFields($('#toiletFields'), GROUPS, { P, prefix: 't', onInput: () => schedule() });
   $('#tResetBtn').addEventListener('click', () => { Object.assign(P, TDEFAULTS); schedule(); if (viewer) viewer.fitted = false; });
@@ -115,7 +117,18 @@ export function createToiletUI(o) {
     o.onChange();
   }
 
+  // the step-by-step guide is only rebuilt while it is on screen (or if its
+  // 3D pictures were interrupted by leaving the tab)
+  function updateGuide() {
+    if (!D || !BOM || !active || sub !== 'guide') return;
+    if (!guideDirty && $('#tGuideDoc').dataset.shots === 'done') return;
+    guideDirty = false;
+    renderToiletGuide($('#tGuideDoc'), { d: D, P, bom: BOM });
+  }
+
   function renderAll() {
+    guideDirty = true;
+    updateGuide();
     updateStepUI();
     renderBOM();
     renderWaste();
@@ -201,6 +214,7 @@ export function createToiletUI(o) {
     $$('#pane-toilet .tpane').forEach((p) => p.classList.toggle('active', p.id === 'tpane-' + sub));
     if (viewer) viewer.active = active && sub === 'model';
     if (sub === 'model' && active) requestAnimationFrame(() => { ensureViewer(); viewer.active = true; viewer.resize(); });
+    if (sub === 'guide') requestAnimationFrame(updateGuide);
   }
   showSub(o.sub);
   $$('#toiletTabs button').forEach((bt) => bt.addEventListener('click', () => { showSub(bt.dataset.sub); o.onSub(sub); }));
@@ -322,6 +336,7 @@ export function createToiletUI(o) {
         if (sub === 'model') {
           requestAnimationFrame(() => { ensureViewer(); viewer.active = true; viewer.resize(); });
         }
+        if (sub === 'guide') requestAnimationFrame(updateGuide);
       } else if (viewer) viewer.active = false;
     },
     total() { return D ? bomTotal(BOM, P, SHIP) : 0; },

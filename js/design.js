@@ -274,7 +274,7 @@ export function design(P) {
   const roofTop = (z) => rafterTop(z) + 1.5 / cos; // top of the purlins
 
   // ---------------------------------------------------------------- walls & openings
-  const mkWall = (key, O, U, n, L, step) => ({ key, O, U, n, L, step, cols: [], bays: [], openings: [], covered: [] });
+  const mkWall = (key, O, U, n, L, step) => ({ key, O, U, n, L, step, cols: [], bays: [], openings: [], covered: [], frame: [], plate: [], anchors: [], gable: [] });
   const walls = {
     back: mkWall('back', V(W, y0, 0), V(-1, 0, 0), V(0, 0, -1), W, STEP.WALL_LONG),
     front: mkWall('front', V(0, y0, D), V(1, 0, 0), V(0, 0, 1), W, STEP.WALL_LONG),
@@ -477,9 +477,11 @@ export function design(P) {
     for (const [s, e] of splitRange(long ? 0 : pw, long ? w.L : w.L - pw, [], 192)) {
       const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, s, e, ringTop, ringTop + 1.5, 0, pw);
       b.lumberBox('2x6', x0, x1, yy0, yy1, z0, z1, { cat: 'framing', name: 'Wall plate on ring beam (2x6)', group: 'plates', step: STEP.PLATES, ex: [0, 2.5 * EX, 0] });
+      w.plate.push([s, e]);
       for (let u of spread(s, e, Math.ceil((e - s) / 32) + 1, 4)) {
         for (let k = 0; k < 4 && blocked.some((x) => Math.abs(x - u) < 1.7); k++) u += u + 2.6 < e ? 2.6 : -2.6;
         fastW(w, 'wedge', u, ringTop + 1.5, pw / 2, UP, po);
+        w.anchors.push(u);
       }
     }
   }
@@ -493,6 +495,9 @@ export function design(P) {
     const fo = { cat: 'framing', group: 'wall', step: w.step, ex: wallEx(w, 0.6, 1.5) };
     const add = (name, size, u0, u1, v0, v1, d0, d1, extra = {}) => {
       const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, u0, u1, v0, v1, d0, d1);
+      // kept in wall coordinates for the step-by-step framing drawings
+      const uc = (u0 + u1) / 2;
+      w.frame.push({ name, u0, u1, v0, v1, bay: w.bays.findIndex(([a, c]) => uc > a - 0.1 && uc < c + 0.1) });
       return b.lumberBox(size, x0, x1, yy0, yy1, z0, z1, { ...fo, name, ...extra });
     };
     const nailO = { ...fo, name: '16d 3-1/2" galv. framing nail' };
@@ -646,6 +651,7 @@ export function design(P) {
         if (hgt < 3) continue;
         const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, g - 0.75, g + 0.75, ringTop + 1.5, ringTop + 1.5 + hgt, 0, 3.5);
         b.lumberBox('2x4', x0, x1, yy0, yy1, z0, z1, go);
+        w.gable.push({ u: g, v0: ringTop + 1.5, v1: ringTop + 1.5 + hgt });
         toeEnds(w, g - 0.75, g + 0.75, ringTop + 1.5, ringTop + 1.5 + hgt, { ...go, name: '16d 3-1/2" galv. framing nail' }, [true, hgt > 6]);
         w.gableStuds.push(g);
       }
@@ -692,12 +698,15 @@ export function design(P) {
     }
   });
   const ridgeTop = rafterTop(zr);
-  for (const [s, e] of splitRange(0, W, rafterXs, 192)) {
+  const ridgeBoards = splitRange(0, W, rafterXs, 192);
+  const tieXs = [];
+  for (const [s, e] of ridgeBoards) {
     b.lumberBox('2x6', s, e, ridgeTop - 5.5, ridgeTop, D / 2 - 0.75, D / 2 + 0.75, { ...rafterOpt, name: 'Ridge board' });
   }
   rafterXs.forEach((x, i) => {
     if (i === 0 || i === rafterXs.length - 1 || i % 2 === 0) return;
     const pieces = splitRange(0, D, [D / 2 + 12], 192);
+    tieXs.push({ x, pieces });
     for (const [s, e] of pieces) {
       b.lumberBox('2x4', x + 0.75, x + 2.25, yTop, yTop + 3.5, s, e, { ...rafterOpt, name: 'Ceiling tie' });
       // face-nailed to the rafter at the wall
@@ -776,6 +785,8 @@ export function design(P) {
     const zAxis = sl.nrm.clone();
     const xAxis = new THREE.Vector3().crossVectors(yAxis, zAxis);
     const run = sheetRun(Ls);
+    sl.run = run;
+    sl.Ls = Ls;
     for (let i = 0; i < nCols; i++) {
       const xi = -R + i * P.tinCover;
       const wi = Math.min(tinW, W + R - xi);
@@ -815,9 +826,12 @@ export function design(P) {
 
   // ---------------------------------------------------------------- siding
   // fix(ui, wi, base, len, last) → [[u, v]] screw positions (wall coords)
+  const sidingLog = [];
   const hang = (w, ua, ub, vbase, topFn, holes0, label, off = 0.15, fix = null) => {
     const L = ub - ua;
     const nc = Math.max(1, Math.ceil((L - (tinW - P.tinCover)) / P.tinCover));
+    const rec = { wall: w.key, label, ua, ub, vbase, n: nc, pieces: [] };
+    sidingLog.push(rec);
     for (let i = 0; i < nc; i++) {
       const ui = ua + i * P.tinCover;
       const wi = Math.min(tinW, ub - ui);
@@ -828,6 +842,7 @@ export function design(P) {
       if (Lc < 2) continue;
       sheetRun(Lc).forEach((pc, j) => {
         const base = vbase + pc.start;
+        rec.pieces.push({ col: i, u: ui, w: wi, len: pc.len, stock: pc.stock });
         const holes = holes0.map((o) => ({ x0: o.u0 - ui, x1: o.u1 - ui, y0: o.v0 - base, y1: o.v1 - base }));
         const profile = (x) => topFn(ui + x) - base;
         const so = off + (i % 2) * 0.08 + j * 0.12;
@@ -959,8 +974,10 @@ export function design(P) {
           b.lumberBox('1x4', x0, x1, yy0, yy1, z0, z1, bo);
           for (const bu of boards) for (const k of [-1.3, 1.3]) fastW(w, 'nail8', bu + k, vv + 1.75 + k * 0.4, 0.25, w.n, doorNail);
         }
-        const ba = [lu1 - 3, lv0 + 9.5 + 1.75];
-        const bc = [lu0 + 3, lv1 - 9.5 - 1.75];
+        // the brace rises from the bottom hinge to the latch side, so it
+        // pushes up the free corner (in compression) instead of hanging from it
+        const ba = [lu0 + 3, lv0 + 9.5 + 1.75];
+        const bc = [lu1 - 3, lv1 - 9.5 - 1.75];
         b.member(toW(w, ba[0], ba[1], 1.375), toW(w, bc[0], bc[1], 1.375), '1x4', w.n, { ...bo, flat: true, name: 'Door brace (1x4)' });
         for (const bu of boards) {
           const t = (bu - ba[0]) / (bc[0] - ba[0]);
@@ -1130,6 +1147,16 @@ export function design(P) {
     q: {
       lumber: b.lumber, wallPly: { type: P.wallPly, pieces: wallPlyPieces }, tin: tinPieces, ridgePieces, windows: winList,
       concreteFt3, cementNet, mesh, plasticFt2, sealFt, wedge, screws, ties, n16, n8, nTie, nPanel, roofFast, doors: nDoors,
+    },
+    // positions the step-by-step guide draws and measures from
+    g: {
+      y0, Pt, PH, C, Rb, ringTop, yTop, pw, E, R, pitch: P.pitch, p, cos, rd, zr, rafterSize, rafterLen, rafterXs, ridgeTop, ridgeBoards, tieXs,
+      blockLevels, winRO, doorRO, leafH, sill, nCols, tinW, sidingLog, mesh, meshDir, T,
+      slopes: slopes.map((sl) => ({ key: sl.key, purlinS: sl.purlinS, top: sl.top, run: sl.run, Ls: sl.Ls })),
+      purlinPieces: splitRange(-R, W + R, rafterXs, 192),
+      walls: Object.fromEntries(Object.values(walls).map((w) => [w.key, {
+        key: w.key, L: w.L, cols: w.cols, bays: w.bays, openings: w.openings, covered: w.covered, frame: w.frame, plate: w.plate, anchors: w.anchors, gable: w.gable,
+      }])),
     },
     doorGrid: Object.fromEntries(Object.values(walls).map((w) => [w.key, w.bays.map(([a, c], i) => ({ width: c - a, fits: w.doorFits[i], door: w.openings.some((o) => o.type === 'door' && o.u0 >= a && o.u1 <= c), covered: w.covered.some(([g0, g1]) => g0 >= a && g1 <= c) }))])),
     info: {

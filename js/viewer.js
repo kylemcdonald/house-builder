@@ -379,12 +379,13 @@ export class Viewer {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.fromArray(p.pos);
       if (p.quat) mesh.quaternion.fromArray(p.quat);
+      if (p.scale) mesh.scale.fromArray(p.scale);
       if (!sketch) decorate(geo, p, mesh);
       mesh.userData.part = p;
       mesh.userData.base = mesh.position.clone();
-      mesh.castShadow = !sketch && p.mat !== 'glass' && p.mat !== 'hole';
+      mesh.castShadow = !sketch && !['glass', 'hole', 'water', 'screen'].includes(p.mat);
       mesh.receiveShadow = !sketch;
-      if (p.mat === 'glass') mesh.renderOrder = 2;
+      if (p.mat === 'glass' || p.mat === 'water' || p.mat === 'screen') mesh.renderOrder = 2;
       if (sketch && p.mat !== 'string' && p.mat !== 'stringDiag') {
         const eg = new THREE.EdgesGeometry(geo, p.kind === 'sheet' ? 40 : 20);
         const lines = new THREE.LineSegments(eg, this.M.edge);
@@ -491,9 +492,9 @@ export class Viewer {
     }
   }
 
-  fit() {
-    if (!this.bounds) return;
-    const { min, max } = this.bounds;
+  fit(bounds = this.bounds) {
+    if (!bounds) return;
+    const { min, max } = bounds;
     const c = new THREE.Vector3((min[0] + max[0]) / 2, (Math.max(0, min[1]) + max[1]) / 2 * 0.8, (min[2] + max[2]) / 2);
     const size = Math.max(max[0] - min[0], max[1] - Math.max(0, min[1]), max[2] - min[2]);
     const vf = THREE.MathUtils.degToRad(this.camera.fov);

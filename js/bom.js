@@ -1,6 +1,7 @@
 // Bill of materials: cut optimisation for lumber, sheet packing for plywood,
 // overage contingency per material group, pricing and weights.
-import { LUMBER, PLY, LUMBER_DENSITY, TIN_LB, CEMENT_LB, MESH } from './catalog.js';
+import { LUMBER, PLY, LUMBER_DENSITY, TIN_LB, CEMENT_LB, MESH, BLOCK, BAG_YIELD_FT3, MORTAR_FT3_PER_BAG } from './catalog.js';
+import { ftin } from './format.js';
 
 const KERF = 0.125;
 
@@ -108,53 +109,43 @@ const lumberLb = (size) => {
   return ((L.t * L.w * L.stock) / 1728) * LUMBER_DENSITY;
 };
 
-export function computeBOM(d, P, prices) {
-  const q = d.q;
-  const lines = [];
-  const pr = (k) => prices[k]?.price ?? 0;
-  const add = (section, key, use, net, ovPct, opts = {}) => {
+// A BOM line: net quantity, plus overage, rounded up to whole units.
+function lineAdder(lines, prices) {
+  return (section, key, use, net, ovPct, opts = {}) => {
     if (net <= 0) return;
     const buy = opts.buy ?? Math.ceil(net * (1 + ovPct / 100) - 1e-9);
     const unit = opts.unit || 'ea';
-    const price = pr(key);
+    const price = opts.price ?? prices[key]?.price ?? 0;
     lines.push({
       section, key, name: opts.name || prices[key]?.name || key, use, net, ov: ovPct, buy, unit, price,
       total: buy * price, est: !!prices[key]?.est, quote: !!prices[key]?.quote, note: prices[key]?.note, lb: (opts.lb || 0) * buy, local: !!opts.local,
+      fixed: !prices[key],
     });
   };
+}
 
-  // ---- lumber
-  const cuts = [];
+// Lumber, cut-optimised per category ({ cat: { section, ov } }) and size.
+function addLumber(add, cuts, list, cats) {
   const groups = {};
-  for (const l of q.lumber) {
-    const k = `${l.cat}|${l.size}`;
-    (groups[k] ||= []).push(l);
-  }
-  const catInfo = {
-    formwork: { section: 'Slab formwork (reused for blocking afterwards)', ov: P.ovFraming },
-    framing: { section: 'Framing lumber', ov: P.ovFraming },
-  };
-  const order = ['framing'];
-  const sizes = Object.keys(LUMBER);
-  for (const cat of order) {
-    for (const size of sizes) {
-      const list = groups[`${cat}|${size}`];
-      if (!list) continue;
+  for (const l of list) (groups[`${l.cat}|${l.size}`] ||= []).push(l);
+  for (const [cat, info] of Object.entries(cats)) {
+    for (const size of Object.keys(LUMBER)) {
+      const ls = groups[`${cat}|${size}`];
+      if (!ls) continue;
       const stock = LUMBER[size].stock;
-      const boards = cutBoards(list.map((l) => ({ len: l.len, label: l.label })), stock);
-      cuts.push({ cat, section: catInfo[cat].section, size, stock, boards });
-      const uses = [...new Set(list.map((l) => l.label.replace(/ \(.*\)/, '')))];
-      add(catInfo[cat].section, 'L' + size, uses.join(', '), boards.length, catInfo[cat].ov, { lb: lumberLb(size), unit: 'boards' });
+      const boards = cutBoards(ls.map((l) => ({ len: l.len, label: l.label })), stock);
+      cuts.push({ cat, section: info.section, size, stock, boards });
+      const uses = [...new Set(ls.map((l) => l.label.replace(/ \(.*\)/, '')))];
+      add(info.section, 'L' + size, uses.join(', '), boards.length, info.ov, { lb: lumberLb(size), unit: 'boards' });
     }
   }
+}
 
-  // ---- plywood
-  add('Plywood', q.wallPly.type, 'Interior wall lining', packSheets(q.wallPly.pieces), P.ovPly, { lb: PLY[q.wallPly.type].lb, unit: 'sheets' });
-
-  // ---- corrugated sheets
+// Corrugated sheet pieces cut from the cheapest mix of 8', 10' and 12' sheets.
+function addTin(add, pieces, P, prices) {
   const pre = P.cladding === 'pvc' ? 'pvc' : 'metal';
-  const stocks = [8, 10, 12].filter((f) => prices[`${pre}${f}`]).map((f) => ({ len: f * 12, cost: pr(`${pre}${f}`) }));
-  const tin = packTin(q.tin, stocks);
+  const stocks = [8, 10, 12].filter((f) => prices[`${pre}${f}`]).map((f) => ({ len: f * 12, cost: prices[`${pre}${f}`].price }));
+  const tin = packTin(pieces, stocks);
   for (const { len: stock } of stocks) {
     const bins = tin.bins.filter((b) => b.stock === stock);
     const pcs = bins.flatMap((b) => b.pieces);
@@ -163,6 +154,31 @@ export function computeBOM(d, P, prices) {
     const uses = [roof && `${roof} roof pieces`, side && `${side} siding pieces`].filter(Boolean).join(', ');
     add('Roofing & siding', `${pre}${stock / 12}`, uses, bins.length, P.ovTin, { lb: (stock / 12) * TIN_LB[pre], unit: 'sheets' });
   }
+  return { tin, pre };
+}
+
+function totals(lines, P, order) {
+  const sections = [...new Set(lines.map((l) => l.section))].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  const subtotal = lines.reduce((s, l) => s + l.total, 0);
+  const tax = (subtotal * (P.tax || 0)) / 100;
+  const weight = lines.reduce((s, l) => s + l.lb, 0);
+  return { sections, subtotal, tax, weight };
+}
+
+export function computeBOM(d, P, prices) {
+  const q = d.q;
+  const lines = [];
+  const add = lineAdder(lines, prices);
+
+  // ---- lumber
+  const cuts = [];
+  addLumber(add, cuts, q.lumber, { framing: { section: 'Framing lumber', ov: P.ovFraming } });
+
+  // ---- plywood
+  add('Plywood', q.wallPly.type, 'Interior wall lining', packSheets(q.wallPly.pieces), P.ovPly, { lb: PLY[q.wallPly.type].lb, unit: 'sheets' });
+
+  // ---- corrugated sheets
+  const { tin, pre } = addTin(add, q.tin, P, prices);
   if (q.ridgePieces) add('Roofing & siding', pre === 'pvc' ? 'ridgePvc' : 'ridgeMetal', 'Ridge', q.ridgePieces, P.ovTin, { lb: 8 });
   // a 10.1 oz tube runs about 20 ft of 3/8" bead
   add('Roofing & siding', 'sealant', `Where the sheets meet the concrete (${Math.round(q.sealFt)} ft)`, q.sealFt / 20, P.ovFasteners, { lb: 0.9, unit: 'tubes' });
@@ -178,6 +194,7 @@ export function computeBOM(d, P, prices) {
   }
 
   // ---- floor slab
+  let meshSpareFt = 0;
   if (q.concreteFt3 > 0) {
     add('Floor slab', 'cement', `New floor slab (${q.concreteFt3.toFixed(0)} ft³ concrete)`, q.cementNet, P.ovCement, { lb: CEMENT_LB, unit: 'bags' });
     const rolls = cutBoards(q.mesh.map((len) => ({ len, label: 'Mesh strip' })), MESH.len);
@@ -185,6 +202,7 @@ export function computeBOM(d, P, prices) {
     const meshFt = q.mesh.reduce((t, l) => t + l, 0) / 12;
     // whole rolls only; the offcut is the contingency
     const spare = (rolls.length * MESH.len) / 12 - meshFt;
+    meshSpareFt = spare;
     add('Floor slab', 'mesh', `Floor reinforcement: ${q.mesh.length} strips, ${Math.round(meshFt)} ft with 6" laps, ${Math.round(spare)} ft spare`, rolls.length, 0, { lb: MESH.lb, unit: 'rolls' });
     add('Floor slab', 'tieWire', 'Tying the mesh laps', 1, 0, { lb: 3.5, unit: 'rolls' });
     add('Floor slab', 'plastic', `Under slab (${q.plasticFt2.toFixed(0)} ft² incl. laps)`, q.plasticFt2 / 220, 0, { lb: 15, unit: 'rolls' });
@@ -194,6 +212,7 @@ export function computeBOM(d, P, prices) {
   const ovF = P.ovFasteners;
   add('Fasteners & hardware', 'nail16', `Framing (~${Math.round(q.n16)} nails)`, Math.max(1, q.n16 / 45), ovF, { lb: 1, unit: 'lb' });
   add('Fasteners & hardware', 'nail8', `Trim, doors, fascia (~${Math.round(q.n8)} nails)`, Math.max(1, q.n8 / 90), ovF, { lb: 1, unit: 'lb' });
+  add('Fasteners & hardware', 'nailTie', `Hurricane ties (~${Math.round(q.nTie)} nails)`, Math.max(1, q.nTie / 150), ovF, { lb: 1, unit: 'lb' });
   add('Fasteners & hardware', 'nailPanel', `Interior plywood (~${Math.round(q.nPanel)} nails)`, Math.max(1, q.nPanel / 300), ovF, { lb: 1, unit: 'lb' });
   add('Fasteners & hardware', 'roofFast', `Roof & siding (~${Math.round(q.roofFast)})`, q.roofFast / 100, ovF, { lb: 1.6, unit: 'boxes' });
   add('Fasteners & hardware', 'wedge', 'Wall plate to ring beam', q.wedge, ovF, { lb: 0.3 });
@@ -211,11 +230,116 @@ export function computeBOM(d, P, prices) {
   ];
 
   const ORDER = ['Floor slab', 'Framing lumber', 'Plywood', 'Roofing & siding', 'Windows', 'Fasteners & hardware'];
-  const sections = [...new Set(lines.map((l) => l.section))].sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
-  const subtotal = lines.reduce((s, l) => s + l.total, 0);
-  const tax = (subtotal * (P.tax || 0)) / 100;
-  const weight = lines.reduce((s, l) => s + l.lb, 0);
-  return { lines, sections, cuts, tinBins: tin.bins, local, subtotal, tax, weight };
+  return { lines, cuts, tinBins: tin.bins, local, meshSpareFt, ...totals(lines, P, ORDER) };
+}
+
+// Toilet house. houseMeshSpareFt: wire mesh left on the house's roll.
+export function computeToiletBOM(d, P, prices, { houseMeshSpareFt = 0 } = {}) {
+  const q = d.q;
+  const i = d.info;
+  const lines = [];
+  const add = lineAdder(lines, prices);
+  const cuts = [];
+  const pit = P.waste === 'pit';
+
+  // ---- slab, blocks, concrete
+  const sec = 'Slab & block wall';
+  const blocks = cutBoards(q.blocks, BLOCK.len);
+  add(sec, 'block', `${P.courses} courses, ${q.blocks.length} pieces incl. cuts (two short cuts share a block)`, blocks.length, P.ovBlock, { lb: BLOCK.lb[P.blockT] || 35, name: `Cement hollow block, ${P.blockT}"` });
+  const bars = cutBoards(q.rebar, 240);
+  cuts.push({ cat: 'rebar', section: sec, size: '#4 rebar', stock: 240, boards: bars });
+  add(sec, 'rebar', `${q.rebar.filter((r) => r.label === 'Dowel').length} dowels into grouted cells, hooked into the slab${pit ? '; pit lid grid' : ''}`, bars.length, 0, { lb: 13.4, unit: 'bars' });
+  const concrete = q.concreteFt3;
+  const bags = concrete / BAG_YIELD_FT3 + q.mortarFt3 / MORTAR_FT3_PER_BAG;
+  const parts = [
+    `slab ${q.slabFt3.toFixed(1)} ft³`, `grout ${q.groutFt3.toFixed(1)} ft³`, `mortar ${q.mortarFt3.toFixed(1)} ft³`,
+    q.collarFt3 && `pipe collars ${q.collarFt3.toFixed(1)} ft³`, q.lidFt3 && `pit lid ${q.lidFt3.toFixed(1)} ft³`,
+  ].filter(Boolean).join(', ');
+  add(sec, 'cement', parts, bags, P.ovCement, { lb: CEMENT_LB, unit: 'bags' });
+  const meshNeed = q.mesh;
+  const meshFt = meshNeed.reduce((t, l) => t + l, 0) / 12;
+  const fromHouse = P.meshFrom === 'house' && houseMeshSpareFt >= meshFt + 1;
+  if (fromHouse) {
+    add(sec, 'meshOffcut', `${Math.ceil(meshFt)} ft of 7' mesh cut from the house roll (${Math.round(houseMeshSpareFt)} ft left over there)`, Math.ceil(meshFt), 0, {
+      name: 'Galv. wire mesh #10, 6" × 6" (house roll offcut)', unit: 'ft', price: 0, local: true,
+    });
+  } else {
+    const rolls = cutBoards(meshNeed.map((len) => ({ len, label: 'Mesh strip' })), MESH.len);
+    add(sec, 'mesh', `${Math.ceil(meshFt)} ft needed${P.meshFrom === 'house' ? ' — not enough left on the house roll, so a whole roll' : ''}`, rolls.length, 0, { lb: MESH.lb, unit: 'rolls' });
+  }
+  add(sec, 'tieWire', 'Mesh laps and dowels', 1, 0, { lb: 3.5, unit: 'rolls' });
+  add(sec, 'plastic', `Under the slab (${q.plasticFt2.toFixed(0)} ft²) and under the plates`, q.plasticFt2 / 220, 0, { lb: 15, unit: 'rolls' });
+
+  // ---- lumber, sheets
+  addLumber(add, cuts, q.lumber, {
+    formwork: { section: 'Slab formwork', ov: 0 },
+    framing: { section: 'Framing lumber', ov: P.ovFraming },
+  });
+  const { tin } = addTin(add, q.tin, P, prices);
+  add('Roofing & siding', 'foam', `Seal the crests over both eave purlins (${Math.round(q.foamFt)} ft) and the vent boot`, q.foamFt / 15, 0, { lb: 1.5, unit: 'cans' });
+  add('Roofing & siding', 'sealant', 'Vent boot and screw heads near it', 1, 0, { lb: 0.9, unit: 'tubes' });
+
+  // ---- screens
+  const scrIn = q.screen.reduce((s, x) => s + x.len * Math.ceil(x.h / 36), 0);
+  const perWidth = Math.max(1, Math.floor(36 / (q.screen[0]?.h || 36)));
+  const scrFt = Math.ceil((q.screen.reduce((s, x) => s + x.len, 0) / perWidth + 12) / 12);
+  add('Vents & screens', 'screen', `${q.screen.length} strips ${ftin(q.screen[0]?.len || 0)} × ${ftin(q.screen[0]?.h || 0)}, ${perWidth} out of the 36" width`, scrIn ? scrFt : 0, 0, { lb: 0.1, unit: 'ft', buy: scrFt });
+  add('Vents & screens', 'staples', 'Screen to the framing', 1, 0, { lb: 1 });
+
+  // ---- toilet & plumbing
+  const ps = pit ? 'Toilet, drain & pit' : 'Toilet & seawater outfall';
+  const dia = P.pipeD;
+  const ov = P.ovPlumbing;
+  add(ps, 'toilet', 'Seat-height pour-flush bowl; no tank', 1, 0, { lb: 45 });
+  const sticks = cutBoards(q.mainPipes.map((len) => ({ len, label: `${dia}" drain` })), 120);
+  cuts.push({ cat: 'pipe', section: ps, size: `${dia}" PVC`, stock: 120, boards: sticks });
+  add(ps, `pipe${dia}`, pit ? `Drain to the pit (${Math.round(i.landRun / 12)} ft)` : `Drain and outfall: ${Math.round(i.landRun / 12)} ft buried, ${Math.round(i.seaRun / 12)} ft in the water`, sticks.length, ov, { lb: dia === 4 ? 20 : 14, unit: '10\' lengths' });
+  const vsticks = cutBoards(q.ventPipes.map((len) => ({ len, label: '2" vent' })), 120);
+  cuts.push({ cat: 'pipe', section: ps, size: '2" PVC', stock: 120, boards: vsticks });
+  add(ps, 'pipe2', 'Vent stack through the roof', vsticks.length, 0, { lb: 6.5, unit: '10\' lengths' });
+  const f = q.fittings;
+  add(ps, 'closetFlange', 'Under the bowl', f.flange, 0, { lb: 1, name: `${dia}" PVC closet flange` });
+  add(ps, 'pvcBend', pit ? '90° closet bend' : '90° closet bend, two 45°s where the pipe meets the water', f.bend, 0, { lb: 1, name: `${dia}" PVC bends` });
+  add(ps, 'pvcTee', 'Vent connection behind the bowl', f.tee, 0, { lb: 1, name: `${dia}" × ${dia}" × 2" PVC sanitary tee` });
+  add(ps, 'cleanout', 'Just outside the back wall', f.cleanout, 0, { lb: 1.5, name: `${dia}" PVC wye with cleanout plug` });
+  add(ps, 'pvcCoupling', 'Joining the 10\' lengths', f.couplings, ov, { lb: 0.4, name: `PVC couplings (${dia}" and 2")` });
+  if (f.check) add(ps, 'checkValve', 'Outlet end', f.check, 0, { lb: 3, name: `${dia}" PVC flap check valve (outfall end)` });
+  add(ps, 'pvcCement', 'All joints', 1, 0, { lb: 1.5 });
+  add(ps, 'ventBoot', 'Where the vent goes through the roof', 1, 0, { lb: 1 });
+  add(ps, 'ventCap', 'Top of the vent', 1, 0, { lb: 0.3 });
+  add(ps, 'pipeStrap', 'Vent stack to the back wall', f.straps, 0, { lb: 0.1 });
+  add(ps, 'drum', 'Seawater for flushing, by the door', 1, 0, { lb: 20 });
+  add(ps, 'bucket', 'Pouring the flush', 1, 0, { lb: 2 });
+  if (pit) {
+    const pb = cutBoards(q.pitBlocks, BLOCK.len);
+    add(ps, 'block', 'Pit lining, open joints', pb.length, P.ovBlock, { lb: BLOCK.lb[P.blockT] || 35, name: `Cement hollow block, ${P.blockT}"` });
+  }
+
+  // ---- fasteners & hardware
+  const ovF = P.ovFasteners;
+  const fh = 'Fasteners & hardware';
+  add(fh, 'nail16', `Framing (~${Math.round(q.n16)} nails)`, Math.max(1, q.n16 / 45), ovF, { lb: 1, unit: 'lb' });
+  add(fh, 'nail8', `Fascia, trim, door (~${Math.round(q.n8)} nails)`, Math.max(1, q.n8 / 90), ovF, { lb: 1, unit: 'lb' });
+  add(fh, 'nailTie', `Hurricane ties (~${Math.round(q.nTie)} nails)`, Math.max(1, q.nTie / 150), ovF, { lb: 1, unit: 'lb' });
+  add(fh, 'roofFast', `Roof & siding (~${Math.round(q.roofFast)})`, q.roofFast / 100, ovF, { lb: 1.6, unit: 'boxes' });
+  add(fh, 'bolt', 'Bottom plates to the grouted block cells', q.bolts, ovF, { lb: 0.6 });
+  add(fh, 'tie', 'Rafters to both top plates', q.ties, ovF, { lb: 0.25 });
+  add(fh, 'conScrew', `Door jambs to the block (~${q.screws})`, q.screws / 100, 0, { lb: 3, unit: 'boxes' });
+  add(fh, 'hinge', 'Door', 3, 0, { lb: 0.8 });
+  add(fh, 'doorPull', 'Outside of the door', 1, 0, { lb: 0.4 });
+  add(fh, 'hookEye', 'Keeps the door shut in the wind', 1, 0, { lb: 0.1 });
+  add(fh, 'barrelBolt', 'Inside of the door', 1, 0, { lb: 0.4 });
+
+  const bagsBuy = lines.find((l) => l.key === 'cement')?.buy || 0;
+  const local = [
+    { name: 'Sand (rinsed with fresh water)', qty: bagsBuy * 2.5, unit: 'ft³' },
+    { name: 'Gravel / crushed coral aggregate', qty: (concrete / BAG_YIELD_FT3) * 3, unit: 'ft³' },
+    { name: 'Fresh water for mixing & curing', qty: bagsBuy * 6, unit: 'gal' },
+    { name: 'Compacted sand / coral fill under the slab', qty: P.floorAbove > P.slabT ? (d.W * (d.D + P.apron) * (P.floorAbove - P.slabT)) / 1728 : 0, unit: 'ft³' },
+    { name: 'Buckets to cast the pipe collars in (reused)', qty: q.collarFt3 ? 4 : 0, unit: 'ea' },
+  ];
+  const ORDER = ['Slab & block wall', 'Slab formwork', 'Framing lumber', 'Roofing & siding', 'Vents & screens', 'Toilet & seawater outfall', 'Toilet, drain & pit', 'Fasteners & hardware'];
+  return { lines, cuts, tinBins: tin.bins, local, meshFromHouse: fromHouse, ...totals(lines, P, ORDER) };
 }
 
 // Sum of quantities by store item (for the consolidated shopping list).

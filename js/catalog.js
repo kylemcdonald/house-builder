@@ -64,8 +64,9 @@ export const DEFAULT_PRICES = {
   louvreGlass3: { name: 'Louver glass 36" obscure', price: 2.15, quote: true },
   louvreGlass4: { name: 'Louver glass 4 ft', price: 5.95 },
   // not on the sign: estimates
-  nail16: { name: '16d galv. common nails (lb)', price: 4.5, est: true },
-  nail8: { name: '8d galv. nails (lb)', price: 4.5, est: true },
+  nail16: { name: '16d 3-1/2" galv. common nails (lb)', price: 4.5, est: true },
+  nail8: { name: '8d 2-1/2" galv. common nails (lb)', price: 4.5, est: true },
+  nailTie: { name: '8d 1-1/2" galv. joist-hanger nails (lb)', price: 5.0, est: true },
   nailPanel: { name: '1-1/4" galv. panel nails (lb)', price: 5.0, est: true },
   roofFast: { name: 'Roofing fasteners w/ sealing washer (box of 100)', price: 15.0, est: true },
   bolt: { name: '1/2" x 8" galv. bolt, nut & 2 washers', price: 4.5, est: true },
@@ -81,6 +82,30 @@ export const DEFAULT_PRICES = {
   ridgeMetal: { name: 'Metal ridge cap 10 ft', price: 18.0, est: true },
   ridgePvc: { name: 'PVC ridge cap 10 ft', price: 22.0, est: true },
   postWrap: { name: 'Bitumen / plastic post-base wrap (per post)', price: 4.0, est: true },
+  // toilet house
+  rebar: { name: '#4 rebar 1/2" × 20\' (Gr 60)', price: 12.99, quote: true },
+  foam: { name: 'Great Stuff Pro window & door foam, 20 oz', price: 22.99, quote: true },
+  screen: { name: 'Fiberglass insect screen, 36" wide (per ft)', price: 1.5, est: true },
+  staples: { name: 'Stainless staples 3/8" (box)', price: 8.0, est: true },
+  doorPull: { name: '6" galv. door pull', price: 4.0, est: true },
+  hookEye: { name: '3" galv. hook & eye', price: 2.5, est: true },
+  barrelBolt: { name: '4" barrel bolt (inside latch)', price: 5.0, est: true },
+  toilet: { name: 'Pour-flush toilet bowl with seat (ceramic, built-in trap)', price: 85.0, est: true },
+  pipe2: { name: '2" PVC pipe, 10 ft', price: 15.0, est: true },
+  pipe3: { name: '3" PVC pipe, 10 ft', price: 28.0, est: true },
+  pipe4: { name: '4" PVC pipe, 10 ft', price: 42.0, est: true },
+  closetFlange: { name: 'PVC closet flange', price: 12.0, est: true },
+  pvcBend: { name: 'PVC bend (90° closet bend / 45°)', price: 14.0, est: true },
+  pvcTee: { name: 'PVC sanitary tee with 2" vent outlet', price: 16.0, est: true },
+  cleanout: { name: 'PVC wye with cleanout plug', price: 25.0, est: true },
+  pvcCoupling: { name: 'PVC coupling', price: 6.0, est: true },
+  checkValve: { name: 'PVC flap check valve (outfall end)', price: 55.0, est: true },
+  pvcCement: { name: 'PVC primer & cement set', price: 18.0, est: true },
+  ventBoot: { name: 'Roof pipe boot for 2" vent', price: 15.0, est: true },
+  ventCap: { name: '2" vent cap with insect screen', price: 8.0, est: true },
+  pipeStrap: { name: 'Galv. pipe strap 2"', price: 0.75, est: true },
+  drum: { name: '55-gal plastic drum', price: 40.0, est: true },
+  bucket: { name: '5-gal bucket with lid', price: 8.0, est: true },
 };
 
 // Shipping weights (lb) and sizes for stock items.
@@ -88,5 +113,10 @@ export const LUMBER_DENSITY = 38; // lb per cubic foot (mixed imported lumber)
 export const TIN_LB = { metal: 1.7, pvc: 1.5 }; // lb per linear foot of 33" sheet
 export const CEMENT_LB = 88; // 40 kg
 export const BLOCK_LB = 35;
+// Hollow concrete block, nominal 4/6/8" thick: 15-5/8" × 7-5/8" faces laid
+// with 3/8" joints (a 16" × 8" module). lb per block by nominal thickness.
+export const BLOCK = { len: 15.625, h: 7.625, joint: 0.375, lb: { 4: 26, 6: 35, 8: 40 } };
+export const MORTAR_FT3_PER_BAG = 3.5; // 1:4 cement:sand mortar per 40 kg bag
+export const PIPE_OD = { 2: 2.375, 3: 3.5, 4: 4.5 }; // PVC outside diameters, in
 export const MESH = { w: 84, len: 1200, grid: 6, wire: 0.135, lb: 147 }; // 7' × 100' roll, #10 wire
 export const BAG_YIELD_FT3 = 3.7; // ft³ of 1:2:3 concrete per 40 kg bag

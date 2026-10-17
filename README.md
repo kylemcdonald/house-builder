@@ -1,6 +1,6 @@
 # Polowat House Builder
 
-A parametric designer for finishing a small house on an existing concrete frame, intended for Polowat atoll (Chuuk, FSM). Materials are bought from a supply shop in Weno and shipped by ferry.
+A parametric designer for finishing a small house on an existing concrete frame, and for a toilet house beside it, intended for Polowat atoll (Chuuk, FSM). Materials are bought from a supply shop in Weno and shipped by ferry.
 
 **Live app:** https://kylemcdonald.github.io/house-builder/
 
@@ -41,6 +41,31 @@ Every dimension of the existing concrete can be set to match what was actually p
 - **Design notes**: key specs, the reasons behind the design choices, and the assumptions you should check.
 - The URL stores every parameter, so a design can be shared as a link.
 
+## Toilet House
+
+A second design for a small outhouse built close to the water:
+- a 4″ slab with 6″ × 6″ wire mesh (cut from what is left on the house's roll when there's enough), with a step in front of the door
+- a hollow-block pony wall with a door gap. The cells under the anchor bolts, at the corners and beside the door are grouted, with #4 dowels hooked into the slab
+- 2x4 framing with corrugated metal or PVC sheet, and a single-slope roof that falls toward the water, away from the door
+- a band of fiberglass insect screen above eye level along both side walls, for cross-ventilation. The eaves are closed with frieze blocks and foam
+- a seat-height pour-flush bowl with a 2″ vent through the roof, flushed with a bucket of seawater
+- an outward-opening board door with no lock: a pull and a hook and eye outside, and a barrel bolt inside for privacy
+
+The waste goes either to a **seawater outfall** or to a **pit**:
+- **Outfall:** a buried drain down the beach, then a pipe along the lagoon floor held down by concrete collars, with a flap valve and a cleanout.
+- **Pit:** block-lined, with a concrete lid. The model shows groundwater standing in it when it is dug below the water table.
+
+The two designs are the top tabs (House and Toilet House), and each has its own row of pages underneath. The toilet house has its own 3D model with 13 construction steps and a "Site" view of the whole outfall. It also has:
+- a **Waste system** page: how the outfall works, its numbers (flush water, how far each flush moves the water in the flooded pipe, how long waste stays in it), what makes it work, and a comparison of outfall, pit and the shoreline
+- a bill of materials with shipping bundles
+- design notes
+
+Toilet-house parameters are kept in the URL with a `t.` prefix, and `tab=` records the open page (for example `tab=ship` or `tab=toilet-waste`).
+
+## Photos
+
+A third top tab, **Photos**, shows a picture of every item on both bills of materials, grouped by kind, with the quantity and cost each design needs. It helps when asking for things at the shop counter. A checkbox also shows catalog items that the current designs don't use (the other plywood, louvre and pipe sizes, for example). The pictures are in `img/items/`, and `js/photo-data.js` records where each one came from. Click a photo to open its source.
+
 ## Structure
 
 A 2x6 wall plate is wedge-anchored to the ring beam, and the rafters sit on it: birdsmouthed, plumb-cut at the tail for the fascia, and fixed with hurricane ties. Each bay between columns is filled with a 2x4 frame, screwed to the pony wall, the columns and the ring beam. The frame has rows of blocking for the vertical corrugated siding. Openings need no headers, because the ring beam spans over them.
@@ -60,6 +85,8 @@ python3 -m http.server 8000
 | `js/bom.js` | Cut optimisation, sheet packing, pricing |
 | `js/shipping.js` | Flat-pack bundle layout |
 | `js/viewer.js`, `js/materials.js`, `js/geometry.js` | Rendering |
-| `js/main.js` | UI |
+| `js/toilet.js` | Toilet house: parameters → parts, steps and quantities |
+| `js/main.js`, `js/toilet-ui.js`, `js/fields.js`, `js/bomview.js`, `js/photos.js` | UI |
+| `js/photo-data.js`, `img/items/` | Item photos and their sources |
 
 This is a planning tool, not a stamped engineering design.

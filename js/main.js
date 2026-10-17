@@ -1,33 +1,55 @@
 import { design, DEFAULTS, STEP, WALL_KEYS, parseDoorBays, formatDoorBays } from './design.js';
-import { computeBOM, shoppingList } from './bom.js';
+import { computeBOM } from './bom.js';
 import { shippingLayout } from './shipping.js';
 import { Viewer } from './viewer.js';
 import { DEFAULT_PRICES, PLY, QUOTE } from './catalog.js';
 import { ftin, inch, money, num } from './format.js';
+import { buildFields, syncFields } from './fields.js';
+import { renderBomDoc, bomTotal } from './bomview.js';
+import { TDEFAULTS } from './toilet.js';
+import { createToiletUI } from './toilet-ui.js';
+import { renderPhotos } from './photos.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
 // ------------------------------------------------------------ state
+// House parameters are plain keys in the URL hash; toilet-house ones are
+// prefixed "t.", and "tab" remembers which page is open: the house's sub-tab
+// (model, ship, bom, notes), "toilet" / "toilet-<sub>" for the toilet house,
+// or "photos".
 const P = { ...DEFAULTS };
+const TP = { ...TDEFAULTS };
+let mode = 'house';
+let houseSub = 'model';
+let toiletSub = 'model';
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   for (const [k, v] of h) {
-    if (!(k in DEFAULTS)) continue;
-    P[k] = typeof DEFAULTS[k] === 'number' ? Number(v) : v;
+    if (k === 'tab') {
+      mode = v.startsWith('toilet') ? 'toilet' : v === 'photos' ? 'photos' : 'house';
+      if (mode === 'toilet') toiletSub = v.split('-')[1] || 'model';
+      else if (mode === 'house') houseSub = v;
+    }
+    const [obj, defs, key] = k.startsWith('t.') ? [TP, TDEFAULTS, k.slice(2)] : [P, DEFAULTS, k];
+    if (!(key in defs)) continue;
+    obj[key] = typeof defs[key] === 'number' ? Number(v) : v;
   }
 }
 function writeHash() {
   const h = new URLSearchParams();
+  const tab = mode === 'toilet' ? (toiletSub === 'model' ? 'toilet' : 'toilet-' + toiletSub) : mode === 'photos' ? 'photos' : houseSub;
+  if (tab !== 'model') h.set('tab', tab);
   for (const k of Object.keys(DEFAULTS)) if (P[k] !== DEFAULTS[k]) h.set(k, P[k]);
+  for (const k of Object.keys(TDEFAULTS)) if (TP[k] !== TDEFAULTS[k]) h.set('t.' + k, TP[k]);
   const s = h.toString();
   history.replaceState(null, '', s ? '#' + s : location.pathname + location.search);
 }
 readHash();
-window.addEventListener('hashchange', () => { readHash(); schedule(); });
+window.addEventListener('hashchange', () => { readHash(); schedule(); toilet.sync(); toilet.regenerate(); });
 
 const PRICE_KEY = 'polowat-house-prices-v2'; // v2: prices from the written quote
-let prices = structuredClone(DEFAULT_PRICES);
+const prices = structuredClone(DEFAULT_PRICES);
 try {
   const saved = JSON.parse(localStorage.getItem(PRICE_KEY) || '{}');
   for (const [k, v] of Object.entries(saved)) if (prices[k]) prices[k].price = v;
@@ -109,45 +131,15 @@ const ADV = [
 ];
 
 function buildAdvanced() {
-  const host = $('#advanced');
-  host.innerHTML = '';
-  for (const g of ADV) {
-    const det = document.createElement('details');
-    det.className = 'group';
-    det.open = g.open;
-    det.innerHTML = `<summary>${g.title}</summary>`;
-    for (const f of g.fields) {
-      const d = document.createElement('div');
-      d.className = 'field' + (f.type === 'pct' || f.type === 'num' ? ' row' : '');
-      if (f.type === 'doorgrid') {
-        d.innerHTML = `<label>Door gaps in the pony wall</label><div class="door-grid" id="doorGrid"></div><div class="hint">One box per bay between columns, numbered left → right as seen from outside. Greyed bays are too narrow for a door.</div>`;
-        det.appendChild(d);
-        continue;
-      }
-      if (f.type === 'covergrid') {
-        d.innerHTML = `<label>Close up these door gaps</label><div class="door-grid" id="coverGrid"></div><div class="hint">Tick a gap to cover it with corrugated sheet outside and plywood inside instead of fitting a door. Only bays with a door gap can be ticked.</div>`;
-        det.appendChild(d);
-        continue;
-      }
-      if (f.type === 'select') {
-        d.innerHTML = `<label for="f-${f.k}">${f.label}</label><select id="f-${f.k}">${f.opts.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>`;
-      } else if (f.type === 'pct' || f.type === 'num') {
-        d.innerHTML = `<label for="f-${f.k}">${f.label}${f.type === 'pct' ? ' (%)' : ''}</label><input type="number" id="f-${f.k}" min="${f.min ?? 0}"${f.max !== undefined ? ` max="${f.max}"` : ''} step="${f.step || 1}">`;
-      } else {
-        d.innerHTML = `<label for="f-${f.k}">${f.label} <span class="val" id="v-${f.k}"></span></label><input type="range" id="f-${f.k}" min="${f.min}" max="${f.max}" step="${f.step}">`;
-      }
-      if (f.hint) d.insertAdjacentHTML('beforeend', `<div class="hint">${f.hint}</div>`);
-      det.appendChild(d);
-      const el = d.querySelector('input,select');
-      el.addEventListener(f.type === 'select' ? 'change' : 'input', () => {
-        let v = f.str ? el.value : Number(el.value);
-        if (!f.str && f.max !== undefined) v = Math.min(f.max, Math.max(f.min ?? 0, v || 0));
-        P[f.k] = v;
-        schedule();
-      });
-    }
-    host.appendChild(det);
-  }
+  buildFields($('#advanced'), ADV, {
+    P,
+    onInput: () => schedule(),
+    custom: (f) => {
+      if (f.type === 'doorgrid') return `<label>Door gaps in the pony wall</label><div class="door-grid" id="doorGrid"></div><div class="hint">One box per bay between columns, numbered left → right as seen from outside. Greyed bays are too narrow for a door.</div>`;
+      if (f.type === 'covergrid') return `<label>Close up these door gaps</label><div class="door-grid" id="coverGrid"></div><div class="hint">Tick a gap to cover it with corrugated sheet outside and plywood inside instead of fitting a door. Only bays with a door gap can be ticked.</div>`;
+      return null;
+    },
+  });
 }
 
 function syncControls() {
@@ -156,16 +148,8 @@ function syncControls() {
   $('#widthVal').textContent = ftin(P.width * 12);
   $('#depthVal').textContent = ftin(P.depth * 12);
   $$('.seg[data-param]').forEach((s) => s.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === P[s.dataset.param])));
-  for (const g of ADV) {
-    for (const f of g.fields) {
-      if (f.type === 'doorgrid' || f.type === 'covergrid') continue;
-      const el = $('#f-' + f.k);
-      if (document.activeElement !== el) el.value = P[f.k];
-      const v = $('#v-' + f.k);
-      if (v) v.textContent = f.fmt(P[f.k]);
-    }
-  }
-  $$('#renderSeg button, #renderSeg2 button').forEach((b) => b.classList.toggle('on', b.dataset.v === renderMode));
+  syncFields(ADV, P);
+  $$('#renderSeg button, #renderSeg2 button, #renderSeg3 button').forEach((b) => b.classList.toggle('on', b.dataset.v === renderMode));
 }
 
 const WALL_LABEL = { front: 'Front', back: 'Back', left: 'Left end', right: 'Right end' };
@@ -236,13 +220,28 @@ function regenerate() {
   viewer.setStep(step, STEP.DONE);
   viewer.setDims($('#dimsChk').checked);
   shipDirty = true;
-  if (activeTab === 'ship') updateShip();
+  if (houseOn('ship')) updateShip();
   updateStepUI();
   renderDoorGrid();
   renderBOM();
   renderNotes();
-  $('#subtitle').textContent = `${ftin(D.W)} × ${ftin(D.D)} on the existing concrete frame · ${D.info.nDoors} doors · ${D.info.nWin} windows`;
   $('#warnings').innerHTML = D.warnings.map((w) => `<div>⚠ ${w}</div>`).join('');
+  // the toilet house may take its wire mesh from the house's roll
+  toilet.refreshBOM();
+  renderPhotosPage();
+  updateHeader();
+}
+
+function updateHeader() {
+  if (!D) return;
+  const t = mode === 'toilet';
+  if (mode === 'photos') {
+    $('#subtitle').textContent = 'Every item on the house and toilet-house bills of materials';
+    $('#totalChip').textContent = money(bomTotal(BOM, P, SHIP) + toilet.total());
+    return;
+  }
+  $('#subtitle').textContent = t ? toilet.subtitle() : `${ftin(D.W)} × ${ftin(D.D)} on the existing concrete frame · ${D.info.nDoors} doors · ${D.info.nWin} windows`;
+  $('#totalChip').textContent = money(t ? toilet.total() : bomTotal(BOM, P, SHIP));
 }
 
 function updateShip() {
@@ -315,7 +314,9 @@ $('#nextStep').addEventListener('click', () => { stop(); setStep(step + 1); });
   new ResizeObserver(place).observe(slider);
 }
 window.addEventListener('keydown', (e) => {
-  if (activeTab !== 'model' || e.target.matches('input,select,textarea')) return;
+  if (e.target.matches('input,select,textarea')) return;
+  if (mode === 'toilet') return toilet.onKey(e);
+  if (!houseOn('model')) return;
   if (e.key === 'ArrowRight') { stop(); setStep(step + 1); }
   if (e.key === 'ArrowLeft') { stop(); setStep(step - 1); }
   if (e.key === ' ') { e.preventDefault(); play(); }
@@ -330,145 +331,101 @@ $$('.seg[data-param]').forEach((s) => s.addEventListener('click', (e) => {
   P[s.dataset.param] = b.dataset.v;
   schedule();
 }));
-$$('#renderSeg, #renderSeg2').forEach((s) => s.addEventListener('click', (e) => {
+$$('#renderSeg, #renderSeg2, #renderSeg3').forEach((s) => s.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   renderMode = b.dataset.v;
   try { localStorage.setItem('polowat-render', renderMode); } catch { /* ignore */ }
   viewer.setMode(renderMode);
   if (shipViewer) shipViewer.setMode(renderMode);
+  toilet.setMode(renderMode);
   syncControls();
 }));
 $('#explode').addEventListener('input', (e) => viewer.setExplode(Number(e.target.value)));
 $('#dimsChk').addEventListener('change', (e) => viewer.setDims(e.target.checked));
-$$('.views button').forEach((b) => b.addEventListener('click', () => viewer.view(b.dataset.view)));
+$$('#hpane-model .views button').forEach((b) => b.addEventListener('click', () => viewer.view(b.dataset.view)));
 $('#resetBtn').addEventListener('click', () => {
   Object.assign(P, DEFAULTS);
   lastSize = '';
   schedule();
   viewer.fitted = false;
 });
-$('#shareBtn').addEventListener('click', async () => {
+$$('.share-btn').forEach((btn) => btn.addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(location.href);
-    $('#shareBtn').textContent = 'Link copied ✓';
+    btn.textContent = 'Link copied ✓';
   } catch {
-    $('#shareBtn').textContent = 'Copy the address bar';
+    btn.textContent = 'Copy the address bar';
   }
-  setTimeout(() => ($('#shareBtn').textContent = 'Copy share link'), 1800);
-});
-
-// ------------------------------------------------------------ tabs
-let activeTab = 'model';
-$$('.tab').forEach((t) => t.addEventListener('click', () => {
-  activeTab = t.dataset.tab;
-  $$('.tab').forEach((x) => x.classList.toggle('active', x === t));
-  $$('.pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + activeTab));
-  viewer.active = activeTab === 'model';
-  if (shipViewer) shipViewer.active = activeTab === 'ship';
-  if (activeTab === 'ship') requestAnimationFrame(() => { updateShip(); shipViewer.active = true; shipViewer.resize(); });
-  if (activeTab === 'model') requestAnimationFrame(() => viewer.resize());
+  setTimeout(() => (btn.textContent = 'Copy share link'), 1800);
 }));
 
-// ------------------------------------------------------------ BOM
-function freightCost() {
-  return SHIP ? SHIP.totVol * P.freight : 0;
+// ------------------------------------------------------------ tabs
+// Top tabs pick the design; each design has its own row of sub-tabs.
+const houseOn = (sub) => mode === 'house' && houseSub === sub;
+function showTab(m) {
+  mode = m === 'toilet' || m === 'photos' ? m : 'house';
+  if (!$(`#houseTabs button[data-sub="${houseSub}"]`)) houseSub = 'model';
+  $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.mode === mode));
+  $('.tab.active').scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  $$('.pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + mode));
+  $$('#houseTabs button').forEach((x) => x.classList.toggle('on', x.dataset.sub === houseSub));
+  $$('#pane-house .tpane').forEach((p) => p.classList.toggle('active', p.id === 'hpane-' + houseSub));
+  const t = mode === 'toilet';
+  $('#sideHouse').hidden = t;
+  $('#sideToilet').hidden = !t;
+  $('.app').classList.toggle('no-side', mode === 'photos');
+  renderPhotosPage();
+  viewer.active = houseOn('model');
+  if (shipViewer) shipViewer.active = houseOn('ship');
+  toilet.setActive(t);
+  if (houseOn('ship')) requestAnimationFrame(() => { updateShip(); shipViewer.active = true; shipViewer.resize(); });
+  if (houseOn('model')) requestAnimationFrame(() => viewer.resize());
+  writeHash();
+  updateHeader();
 }
+$$('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.mode)));
+$$('#houseTabs button').forEach((b) => b.addEventListener('click', () => { houseSub = b.dataset.sub; showTab('house'); }));
+
+// ------------------------------------------------------------ prices (shared by both designs)
+function pricesChanged() {
+  savePrices();
+  BOM = computeBOM(D, P, prices);
+  renderBOM();
+  toilet.refreshBOM();
+  renderPhotosPage();
+  updateHeader();
+}
+function resetPrices() {
+  for (const [k, v] of Object.entries(DEFAULT_PRICES)) prices[k].price = v.price;
+  pricesChanged();
+}
+
+// ------------------------------------------------------------ toilet house
+const toilet = createToiletUI({
+  P: TP,
+  prices,
+  sub: toiletSub,
+  getMode: () => renderMode,
+  onSub: (s) => { toiletSub = s; writeHash(); },
+  houseMeshSpare: () => BOM?.meshSpareFt ?? 0,
+  onChange: () => { writeHash(); updateHeader(); },
+  onPrices: pricesChanged,
+  onResetPrices: resetPrices,
+});
+
+// ------------------------------------------------------------ BOM
 function renderBOM() {
-  const b = BOM;
-  const freight = freightCost();
-  const total = b.subtotal + b.tax + freight;
-  $('#totalChip').textContent = money(total);
-  const floorArea = D.info.floorArea;
-  let h = `<h2>Bill of materials</h2>
-  <p class="muted">Quantities are computed from the 3D model: lumber is cut-optimised from 16' boards, plywood is nested on 4'×8' sheets, nails, screws, anchors and ties are counted from the hardware drawn in the model, and each group carries its own contingency (set in the sidebar). Prices marked <span class="badge quote">quote</span> come from the Weno supply shop's written quote (${QUOTE.ref}, ${QUOTE.date}, valid for 7 days); the rest come from the shop's price sign, and items marked <span class="badge">est.</span> are on neither and are estimates. Edit any price and it is saved in this browser.</p>
-  <div class="cards">
-    <div class="card"><div class="k">Total</div><div class="v">${money(total)}</div><div class="s">incl. ${P.tax}% tax${freight ? ` and ${money(freight)} freight` : ''}</div></div>
-    <div class="card"><div class="k">Per sq ft of floor</div><div class="v">${money(total / floorArea)}</div><div class="s">${num(floorArea)} sq ft</div></div>
-    <div class="card"><div class="k">Shipping weight</div><div class="v">${num(SHIP.totLb)} lb</div><div class="s">${num(SHIP.totLb * 0.4536)} kg</div></div>
-    <div class="card"><div class="k">Shipping volume</div><div class="v">${num(SHIP.totVol)} ft³</div><div class="s">${num((SHIP.totVol / 1172) * 100)}% of a 20' container</div></div>
-  </div>
-  <div class="actions">
-    <button class="btn" id="csvBtn">Download CSV</button>
-    <button class="btn" id="printBtn">Print</button>
-    <button class="btn" id="resetPrices">Reset prices</button>
-  </div>
-  <div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th>Used for</th><th class="n">Net</th><th class="n">+ Over</th><th class="n">Buy</th><th class="n">Unit price</th><th class="n">Total</th></tr></thead><tbody>`;
-  for (const sec of b.sections) {
-    const ls = b.lines.filter((l) => l.section === sec);
-    const st = ls.reduce((s, l) => s + l.total, 0);
-    h += `<tr class="sec"><td colspan="6">${sec}</td><td class="n">${money(st)}</td></tr>`;
-    for (const l of ls) {
-      h += `<tr><td>${l.name}${l.est ? '<span class="badge">est.</span>' : ''}${l.quote ? '<span class="badge quote">quote</span>' : ''}${l.note ? `<div class="use">⚠ ${l.note}</div>` : ''}</td>
-      <td><span class="use">${l.use}</span></td>
-      <td class="n">${num(l.net, l.net % 1 ? 1 : 0)}</td>
-      <td class="n">${l.ov}%</td>
-      <td class="n"><b>${num(l.buy)}</b> ${l.unit !== 'ea' ? `<span class="use">${l.unit}</span>` : ''}</td>
-      <td class="n">$<input class="price" data-key="${l.key}" type="number" step="0.05" min="0" value="${l.price.toFixed(2)}"></td>
-      <td class="n">${money(l.total)}</td></tr>`;
-    }
-  }
-  h += `<tr class="tot"><td colspan="6">Materials subtotal</td><td class="n">${money(b.subtotal)}</td></tr>`;
-  if (b.tax) h += `<tr><td colspan="6">Sales tax ${P.tax}%</td><td class="n">${money(b.tax)}</td></tr>`;
-  if (freight) h += `<tr><td colspan="6">Ferry freight: ${num(SHIP.totVol)} ft³ × ${money(P.freight)}</td><td class="n">${money(freight)}</td></tr>`;
-  h += `<tr class="tot"><td colspan="6">Total</td><td class="n">${money(total)}</td></tr></tbody></table></div>`;
-
-  // consolidated shopping list
-  const shop = shoppingList(b);
-  h += `<h3>Shopping list (what to ask for at the counter)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Total</th></tr></thead><tbody>`;
-  for (const s of shop) h += `<tr><td>${s.name}${s.est ? '<span class="badge">est.</span>' : ''}${s.quote ? '<span class="badge quote">quote</span>' : ''}</td><td class="n">${num(s.buy)} ${s.unit !== 'ea' ? s.unit : ''}</td><td class="n">${money(s.price)}</td><td class="n">${money(s.total)}</td></tr>`;
-  h += `</tbody></table></div>`;
-
-  h += `<h3>Local materials (gathered on Polowat, not purchased)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Material</th><th class="n">Qty</th></tr></thead><tbody>`;
-  for (const l of b.local.filter((x) => x.qty > 0)) h += `<tr><td>${l.name}</td><td class="n">${num(l.qty)} ${l.unit}</td></tr>`;
-  h += `</tbody></table></div>`;
-
-  // cut list
-  h += `<h3>Cut list</h3><p class="muted">How each 16' (or 18') board is cut. Hatched area is waste. Cuts include a 1/8" saw kerf.</p>`;
-  for (const c of b.cuts) {
-    const used = c.boards.reduce((s, bd) => s + bd.pieces.reduce((a, p) => a + p.len, 0), 0);
-    const eff = (used / (c.boards.length * c.stock)) * 100;
-    h += `<h4 style="margin:14px 0 6px">${c.section} — ${c.size} × ${ftin(c.stock)} · ${c.boards.length} boards · ${num(eff)}% yield</h4><div class="cutlist">`;
-    c.boards.forEach((bd, i) => {
-      h += `<div class="cut-row"><span class="lab">#${i + 1}</span><div class="cut-bar">`;
-      bd.pieces.forEach((pc, j) => {
-        h += `<div class="${j % 2 ? 's' : ''}" style="width:${(pc.len / c.stock) * 100}%" title="${pc.label}: ${ftin(pc.len)}">${ftin(pc.len)} ${pc.label}</div>`;
-      });
-      h += `</div></div>`;
-    });
-    h += `</div>`;
-  }
-  $('#bomDoc').innerHTML = h;
-  $$('#bomDoc input.price').forEach((inp) => inp.addEventListener('change', () => {
-    const k = inp.dataset.key;
-    prices[k].price = Math.max(0, Number(inp.value) || 0);
-    savePrices();
-    BOM = computeBOM(D, P, prices);
-    renderBOM();
-  }));
-  $('#csvBtn').addEventListener('click', downloadCSV);
-  $('#printBtn').addEventListener('click', () => window.print());
-  $('#resetPrices').addEventListener('click', () => {
-    prices = structuredClone(DEFAULT_PRICES);
-    savePrices();
-    BOM = computeBOM(D, P, prices);
-    renderBOM();
+  renderBomDoc($('#bomDoc'), {
+    bom: BOM, P, ship: SHIP, prices, area: D.info.floorArea,
+    csvName: `house-${P.width}x${P.depth}-bom.csv`, onPrices: pricesChanged, onResetPrices: resetPrices,
   });
 }
 
-function downloadCSV() {
-  const rows = [['Section', 'Item', 'Used for', 'Net', 'Overage %', 'Buy', 'Unit', 'Unit price', 'Total', 'Estimated price']];
-  for (const l of BOM.lines) rows.push([l.section, l.name, l.use, l.net.toFixed(2), l.ov, l.buy, l.unit, l.price.toFixed(2), l.total.toFixed(2), l.est ? 'yes' : '']);
-  rows.push(['', 'Subtotal', '', '', '', '', '', '', BOM.subtotal.toFixed(2), '']);
-  if (BOM.tax) rows.push(['', `Sales tax ${P.tax}%`, '', '', '', '', '', '', BOM.tax.toFixed(2), '']);
-  rows.push(['', 'Total', '', '', '', '', '', '', (BOM.subtotal + BOM.tax + freightCost()).toFixed(2), '']);
-  if (freightCost()) rows.push(['', 'Freight', '', '', '', '', '', '', freightCost().toFixed(2), '']);
-  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  a.download = `house-${P.width}x${P.depth}-bom.csv`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+// ------------------------------------------------------------ photos
+function renderPhotosPage() {
+  if (mode !== 'photos' || !toilet.BOM) return;
+  renderPhotos($('#photosDoc'), { boms: { house: BOM, toilet: toilet.BOM }, prices });
 }
 
 // ------------------------------------------------------------ shipping table
@@ -541,8 +498,11 @@ function renderNotes() {
 // ------------------------------------------------------------ go
 buildAdvanced();
 syncControls();
+toilet.sync();
 regenerate();
+toilet.regenerate();
 viewer.fit();
+showTab(mode);
 
 // expose for debugging
-window.__house = { P, get D() { return D; }, get BOM() { return BOM; }, viewer, setStep };
+window.__house = { P, get D() { return D; }, get BOM() { return BOM; }, viewer, setStep, toilet };

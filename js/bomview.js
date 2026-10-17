@@ -1,0 +1,102 @@
+// Bill-of-materials page, shared by the house and the toilet house.
+import { shoppingList } from './bom.js';
+import { QUOTE } from './catalog.js';
+import { ftin, money, num } from './format.js';
+
+// opts: { bom, P, ship, prices, area, areaLabel, csvName, onPrices, onResetPrices, extraCards }
+export function renderBomDoc(host, o) {
+  const { bom: b, P, ship } = o;
+  const freight = ship ? ship.totVol * P.freight : 0;
+  const total = b.subtotal + b.tax + freight;
+  let h = `<h2>Bill of materials</h2>
+  <p class="muted">Quantities are computed from the 3D model: lumber is cut-optimised from 16' boards, sheets are nested, nails, screws, anchors and ties are counted from the hardware drawn in the model, and each group carries its own contingency (set in the sidebar). Prices marked <span class="badge quote">quote</span> come from the Weno supply shop's written quote (${QUOTE.ref}, ${QUOTE.date}, valid for 7 days); the rest come from the shop's price sign, and items marked <span class="badge">est.</span> are on neither and are estimates. Edit any price and it is saved in this browser.</p>
+  <div class="cards">
+    <div class="card"><div class="k">Total</div><div class="v">${money(total)}</div><div class="s">incl. ${P.tax}% tax${freight ? ` and ${money(freight)} freight` : ''}</div></div>
+    <div class="card"><div class="k">Per sq ft of floor</div><div class="v">${money(total / o.area)}</div><div class="s">${num(o.area, o.area < 100 ? 1 : 0)} sq ft${o.areaLabel ? ` ${o.areaLabel}` : ''}</div></div>
+    <div class="card"><div class="k">Shipping weight</div><div class="v">${num(ship.totLb)} lb</div><div class="s">${num(ship.totLb * 0.4536)} kg</div></div>
+    <div class="card"><div class="k">Shipping volume</div><div class="v">${num(ship.totVol)} ft³</div><div class="s">${num((ship.totVol / 1172) * 100)}% of a 20' container</div></div>
+  </div>
+  <div class="actions">
+    <button class="btn" data-act="csv">Download CSV</button>
+    <button class="btn" data-act="print">Print</button>
+    <button class="btn" data-act="reset">Reset prices</button>
+  </div>
+  <div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th>Used for</th><th class="n">Net</th><th class="n">+ Over</th><th class="n">Buy</th><th class="n">Unit price</th><th class="n">Total</th></tr></thead><tbody>`;
+  for (const sec of b.sections) {
+    const ls = b.lines.filter((l) => l.section === sec);
+    const st = ls.reduce((s, l) => s + l.total, 0);
+    h += `<tr class="sec"><td colspan="6">${sec}</td><td class="n">${money(st)}</td></tr>`;
+    for (const l of ls) {
+      h += `<tr><td>${l.name}${l.est ? '<span class="badge">est.</span>' : ''}${l.quote ? '<span class="badge quote">quote</span>' : ''}${l.note ? `<div class="use">⚠ ${l.note}</div>` : ''}</td>
+      <td><span class="use">${l.use}</span></td>
+      <td class="n">${num(l.net, l.net % 1 ? 1 : 0)}</td>
+      <td class="n">${l.ov}%</td>
+      <td class="n"><b>${num(l.buy)}</b> ${l.unit !== 'ea' ? `<span class="use">${l.unit}</span>` : ''}</td>
+      <td class="n">${l.fixed ? money(l.price) : `$<input class="price" data-key="${l.key}" type="number" step="0.05" min="0" value="${l.price.toFixed(2)}">`}</td>
+      <td class="n">${money(l.total)}</td></tr>`;
+    }
+  }
+  h += `<tr class="tot"><td colspan="6">Materials subtotal</td><td class="n">${money(b.subtotal)}</td></tr>`;
+  if (b.tax) h += `<tr><td colspan="6">Sales tax ${P.tax}%</td><td class="n">${money(b.tax)}</td></tr>`;
+  if (freight) h += `<tr><td colspan="6">Ferry freight: ${num(ship.totVol)} ft³ × ${money(P.freight)}</td><td class="n">${money(freight)}</td></tr>`;
+  h += `<tr class="tot"><td colspan="6">Total</td><td class="n">${money(total)}</td></tr></tbody></table></div>`;
+
+  const shop = shoppingList(b).filter((s) => s.total > 0);
+  h += `<h3>Shopping list (what to ask for at the counter)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Total</th></tr></thead><tbody>`;
+  for (const s of shop) h += `<tr><td>${s.name}${s.est ? '<span class="badge">est.</span>' : ''}${s.quote ? '<span class="badge quote">quote</span>' : ''}</td><td class="n">${num(s.buy)} ${s.unit !== 'ea' ? s.unit : ''}</td><td class="n">${money(s.price)}</td><td class="n">${money(s.total)}</td></tr>`;
+  h += `</tbody></table></div>`;
+
+  h += `<h3>Local materials (gathered on Polowat, not purchased)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Material</th><th class="n">Qty</th></tr></thead><tbody>`;
+  for (const l of b.local.filter((x) => x.qty > 0)) h += `<tr><td>${l.name}</td><td class="n">${num(l.qty)} ${l.unit}</td></tr>`;
+  h += `</tbody></table></div>`;
+
+  if (o.shipTable) {
+    h += `<h3>Shipping</h3><div class="table-wrap"><table class="t"><thead><tr><th>Bundle</th><th>Size (L × W × H)</th><th class="n">ft³</th><th class="n">lb</th></tr></thead><tbody>`;
+    for (const s of ship.bundles) h += `<tr><td><b>${s.name}</b><div class="use">${s.qty}</div></td><td>${ftin(s.L)} × ${ftin(s.Wd)} × ${ftin(s.H)}</td><td class="n">${num(s.vol, 1)}</td><td class="n">${num(s.lb)}</td></tr>`;
+    h += `<tr class="tot"><td colspan="2">Total</td><td class="n">${num(ship.totVol, 1)}</td><td class="n">${num(ship.totLb)}</td></tr></tbody></table></div>`;
+  }
+
+  h += `<h3>Cut list</h3><p class="muted">How each board, bar or length of pipe is cut. Hatched area is waste. Cuts include a 1/8" saw kerf.</p>`;
+  for (const c of b.cuts) {
+    const used = c.boards.reduce((s, bd) => s + bd.pieces.reduce((a, p) => a + p.len, 0), 0);
+    const eff = (used / (c.boards.length * c.stock)) * 100;
+    const unit = c.cat === 'pipe' ? 'lengths' : c.cat === 'rebar' ? 'bars' : c.cat === 'mesh' ? 'rolls' : 'boards';
+    h += `<h4 style="margin:14px 0 6px">${c.section} — ${c.size} × ${ftin(c.stock)} · ${c.boards.length} ${unit} · ${num(eff)}% yield</h4><div class="cutlist">`;
+    c.boards.forEach((bd, i) => {
+      h += `<div class="cut-row"><span class="lab">#${i + 1}</span><div class="cut-bar">`;
+      bd.pieces.forEach((pc, j) => {
+        h += `<div class="${j % 2 ? 's' : ''}" style="width:${(pc.len / c.stock) * 100}%" title="${pc.label}: ${ftin(pc.len)}">${ftin(pc.len)} ${pc.label}</div>`;
+      });
+      h += `</div></div>`;
+    });
+    h += `</div>`;
+  }
+  host.innerHTML = h;
+  host.querySelectorAll('input.price').forEach((inp) => inp.addEventListener('change', () => {
+    o.prices[inp.dataset.key].price = Math.max(0, Number(inp.value) || 0);
+    o.onPrices();
+  }));
+  host.querySelector('[data-act=csv]').addEventListener('click', () => downloadCSV(b, P, freight, o.csvName));
+  host.querySelector('[data-act=print]').addEventListener('click', () => window.print());
+  host.querySelector('[data-act=reset]').addEventListener('click', o.onResetPrices);
+  return total;
+}
+
+function downloadCSV(b, P, freight, name) {
+  const rows = [['Section', 'Item', 'Used for', 'Net', 'Overage %', 'Buy', 'Unit', 'Unit price', 'Total', 'Estimated price']];
+  for (const l of b.lines) rows.push([l.section, l.name, l.use, l.net.toFixed(2), l.ov, l.buy, l.unit, l.price.toFixed(2), l.total.toFixed(2), l.est ? 'yes' : '']);
+  rows.push(['', 'Subtotal', '', '', '', '', '', '', b.subtotal.toFixed(2), '']);
+  if (b.tax) rows.push(['', `Sales tax ${P.tax}%`, '', '', '', '', '', '', b.tax.toFixed(2), '']);
+  rows.push(['', 'Total', '', '', '', '', '', '', (b.subtotal + b.tax + freight).toFixed(2), '']);
+  if (freight) rows.push(['', 'Freight', '', '', '', '', '', '', freight.toFixed(2), '']);
+  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+export function bomTotal(b, P, ship) {
+  return b.subtotal + b.tax + (ship ? ship.totVol * P.freight : 0);
+}

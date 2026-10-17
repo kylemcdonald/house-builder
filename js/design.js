@@ -58,15 +58,15 @@ export const STEP = {
   PURLINS: 7, ROOFING: 8, SIDING: 9, WINDOWS: 10, DOOR: 11, INTERIOR: 12, DONE: 13,
 };
 
-const EX = 24; // explode unit, inches
+export const EX = 24; // explode unit, inches
 const TIN_STOCK = [120, 144];
-const LAP = 6; // end lap for corrugated sheets
-const CORR = { pitch: 3, depth: 0.75 };
+export const LAP = 6; // end lap for corrugated sheets
+export const CORR = { pitch: 3, depth: 0.75 };
 
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const UP = V(0, 1, 0);
 
-class Builder {
+export class Builder {
   constructor() {
     this.parts = [];
     this.lumber = [];
@@ -154,7 +154,7 @@ class Builder {
 
 // Split [a,b] into pieces no longer than max, preferring to split at one of
 // the candidate positions (e.g. over a post or rafter).
-function splitRange(a, b, cands, max, fromRight = false) {
+export function splitRange(a, b, cands, max, fromRight = false) {
   if (fromRight) {
     return splitRange(-b, -a, cands.map((c) => -c), max).map(([s, e]) => [-e, -s]).reverse();
   }
@@ -173,7 +173,7 @@ function splitRange(a, b, cands, max, fromRight = false) {
 }
 
 // Subtract a list of [a,b] intervals from [lo,hi].
-function subtract(lo, hi, holes) {
+export function subtract(lo, hi, holes) {
   let segs = [[lo, hi]];
   for (const [a, b] of holes) {
     const next = [];
@@ -215,7 +215,7 @@ export function sheetCombo(L) {
 
 // Lay pieces of corrugated sheet up a column of length L. Returns
 // [{start, len, stock}] where start is measured from the bottom.
-function sheetRun(L) {
+export function sheetRun(L) {
   const combo = sheetCombo(L);
   const out = [];
   let s = 0;
@@ -495,7 +495,7 @@ export function design(P) {
       const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, u0, u1, v0, v1, d0, d1);
       return b.lumberBox(size, x0, x1, yy0, yy1, z0, z1, { ...fo, name, ...extra });
     };
-    const nailO = { ...fo, name: '16d galv. framing nail' };
+    const nailO = { ...fo, name: '16d 3-1/2" galv. framing nail' };
     const scrO = { ...fo, name: 'Concrete screw 1/4" × 3-1/4"' };
     const screwRow = (u0, u1, v, out) => { for (const u of spread(u0, u1, Math.ceil((u1 - u0) / 24) + 1)) fastW(w, 'conScrew', u, v, 1.75, out, scrO); };
     const screwCol = (u, v0, v1, out, n) => { for (const v of spread(v0, v1, n, 4)) fastW(w, 'conScrew', u, v, 1.75, out, scrO); };
@@ -646,7 +646,7 @@ export function design(P) {
         if (hgt < 3) continue;
         const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, g - 0.75, g + 0.75, ringTop + 1.5, ringTop + 1.5 + hgt, 0, 3.5);
         b.lumberBox('2x4', x0, x1, yy0, yy1, z0, z1, go);
-        toeEnds(w, g - 0.75, g + 0.75, ringTop + 1.5, ringTop + 1.5 + hgt, { ...go, name: '16d galv. framing nail' }, [true, hgt > 6]);
+        toeEnds(w, g - 0.75, g + 0.75, ringTop + 1.5, ringTop + 1.5 + hgt, { ...go, name: '16d 3-1/2" galv. framing nail' }, [true, hgt > 6]);
         w.gableStuds.push(g);
       }
     }
@@ -660,9 +660,9 @@ export function design(P) {
   const zr = D / 2 - 0.75;
   const rafterLen = (zr + E) / cos;
   const profile = [[-E, underside(-E)], [0, underside(0)], [0, yTop], [pw, yTop], [zr, underside(zr)], [zr, rafterTop(zr)], [-E, rafterTop(-E)]];
-  const roofNail = { group: 'roof', step: STEP.ROOF_FRAME, ex: roofEx, name: '16d galv. framing nail' };
+  const roofNail = { group: 'roof', step: STEP.ROOF_FRAME, ex: roofEx, name: '16d 3-1/2" galv. framing nail' };
   const tieO = { mat: 'steel', group: 'roof', step: STEP.ROOF_FRAME, ex: roofEx, name: 'Hurricane tie (galv.)' };
-  const tieNail = { ...roofNail, name: 'Hurricane tie nail' };
+  const tieNail = { ...roofNail, name: 'Hurricane tie nail 8d 1-1/2"' };
   let ties = 0;
   rafterXs.forEach((x, i) => {
     b.prism(profile, x - 0.75, x + 0.75, rafterSize, rafterLen, rafterOpt);
@@ -742,7 +742,7 @@ export function design(P) {
         for (const x of rafterXs) {
           if (x < xa - 0.01 || x > xb + 0.01) continue;
           const xn = Math.min(xb - 0.5, Math.max(xa + 0.5, x));
-          for (const k of [-1, 1]) b.fasten('nail16', V(xn, y, z).addScaledVector(sl.nrm, 1.5).addScaledVector(upDir, k), sl.nrm, { ...purO, name: '16d galv. framing nail' });
+          for (const k of [-1, 1]) b.fasten('nail16', V(xn, y, z).addScaledVector(sl.nrm, 1.5).addScaledVector(upDir, k), sl.nrm, { ...purO, name: '16d 3-1/2" galv. framing nail' });
         }
       }
     }
@@ -753,7 +753,7 @@ export function design(P) {
       b.lumberBox('1x6', xa, xb, yf - 5.5, yf, za, za + 0.75, fasO);
     }
     const zOut = sl.dir > 0 ? sl.zt - 0.75 : sl.zt + 0.75;
-    for (const x of rafterXs) for (const y of [yf - 1.5, yf - 4]) b.fasten('nail8', V(x, y, zOut), V(0, 0, -sl.dir), { ...fasO, name: '8d galv. nail' });
+    for (const x of rafterXs) for (const y of [yf - 1.5, yf - 4]) b.fasten('nail8', V(x, y, zOut), V(0, 0, -sl.dir), { ...fasO, name: '8d 2-1/2" galv. nail' });
   }
 
   // ---------------------------------------------------------------- roofing
@@ -881,7 +881,7 @@ export function design(P) {
       const step = isDoor ? STEP.DOOR : STEP.WINDOWS;
       const exOut = wallEx(w, 3.2, 1.5);
       const trimO = { cat: 'framing', group: 'trim', step, ex: wallEx(w, 2.8, 1.5), name: isDoor ? 'Door casing (1x4)' : 'Window casing (1x4)' };
-      const n8 = (o) => ({ group: o.group, step, ex: o.ex, name: '8d galv. nail' });
+      const n8 = (o) => ({ group: o.group, step, ex: o.ex, name: '8d 2-1/2" galv. nail' });
       const addT = (a, c, va, vc) => {
         if (vc - va < 1) return;
         const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, a, c, va, vc, trimD[0], trimD[1]);
@@ -935,11 +935,11 @@ export function design(P) {
         // jambs: concrete screws into the pony-wall ends, nails into the kings
         const jd = (Pt - 1.25) / 2;
         for (const v of spread(0, v1 - 0.75, Math.ceil(v1 / 16) + 1, 4)) {
-          const [shape, nm] = v < PH ? ['conScrew', 'Concrete screw 1/4" × 3-1/4"'] : ['nail8', '8d galv. nail'];
+          const [shape, nm] = v < PH ? ['conScrew', 'Concrete screw 1/4" × 3-1/4"'] : ['nail8', '8d 2-1/2" galv. nail'];
           fastW(w, shape, u0 + 0.75, v, jd, w.U, { ...jo, name: nm });
           fastW(w, shape, u1 - 0.75, v, jd, w.U.clone().negate(), { ...jo, name: nm });
         }
-        for (const u of spread(u0 + 0.75, u1 - 0.75, 3, 4)) fastW(w, 'nail8', u, v1 - 0.75, jd, UP.clone().negate(), { ...jo, name: '8d galv. nail' });
+        for (const u of spread(u0 + 0.75, u1 - 0.75, 3, 4)) fastW(w, 'nail8', u, v1 - 0.75, jd, UP.clone().negate(), { ...jo, name: '8d 2-1/2" galv. nail' });
         const lu0 = u0 + 1;
         const lu1 = u1 - 1;
         const lv0 = 0.5;
@@ -953,7 +953,7 @@ export function design(P) {
           boards.push((u + ue) / 2);
         }
         const bo = { ...lo, name: 'Door batten (1x4)' };
-        const doorNail = { ...lo, name: '8d galv. nail (clinched)' };
+        const doorNail = { ...lo, name: '8d 2-1/2" galv. nail (clinched)' };
         for (const vv of [lv0 + 6, lv1 - 9.5]) {
           const [x0, x1, yy0, yy1, z0, z1] = wallBox(w, lu0 + 1, lu1 - 1, vv, vv + 3.5, 1.0, 1.75);
           b.lumberBox('1x4', x0, x1, yy0, yy1, z0, z1, bo);
@@ -1073,7 +1073,8 @@ export function design(P) {
   b.flushHardware();
   const hc = (k) => b.hwCount[k] || 0;
   const n16 = hc('nail16');
-  const n8 = hc('nail8') + hc('tieNail');
+  const n8 = hc('nail8');
+  const nTie = hc('tieNail');
   const nPanel = hc('panelNail');
   const roofFast = hc('roofScrew');
   const wedge = hc('wedge');
@@ -1128,7 +1129,7 @@ export function design(P) {
     bounds: { min: [-R - 40, footBot, -E - 40], max: [W + R + 40, roofTop(D / 2) + 12, D + E + 40] },
     q: {
       lumber: b.lumber, wallPly: { type: P.wallPly, pieces: wallPlyPieces }, tin: tinPieces, ridgePieces, windows: winList,
-      concreteFt3, cementNet, mesh, plasticFt2, sealFt, wedge, screws, ties, n16, n8, nPanel, roofFast, doors: nDoors,
+      concreteFt3, cementNet, mesh, plasticFt2, sealFt, wedge, screws, ties, n16, n8, nTie, nPanel, roofFast, doors: nDoors,
     },
     doorGrid: Object.fromEntries(Object.values(walls).map((w) => [w.key, w.bays.map(([a, c], i) => ({ width: c - a, fits: w.doorFits[i], door: w.openings.some((o) => o.type === 'door' && o.u0 >= a && o.u1 <= c), covered: w.covered.some(([g0, g1]) => g0 >= a && g1 <= c) }))])),
     info: {

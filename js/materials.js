@@ -451,6 +451,16 @@ const SKETCH = {
   stringDiag: 0x2f7cf6,
   rebar: 0x9a5a36,
   plastic: 0x3a4652,
+  mortar: 0xd2cec4,
+  fill: 0xd9cba8,
+  ceramic: 0xf7f7f4,
+  seat: 0xf0f0ec,
+  pvcPipe: 0xe9e9e3,
+  screen: 0x2f3438,
+  water: 0x3a9fb0,
+  drum: 0x1f5fa8,
+  bucket: 0xe8742a,
+  rubber: 0x2a2a2a,
 };
 
 // Per-part colour variation in the realistic view (brightness spread, hue
@@ -463,6 +473,7 @@ export const TINT = {
   pvc: [0.03, 0],
   concrete: [0.06, 0.01],
   slab: [0.04, 0],
+  block: [0.07, 0.01],
 };
 
 export function makeMaterials(mode) {
@@ -480,9 +491,9 @@ export function makeMaterials(mode) {
         polygonOffset: k !== 'tin' && k !== 'pvc',
         polygonOffsetFactor: 1,
         polygonOffsetUnits: 1,
-        transparent: k === 'glass',
-        opacity: k === 'glass' ? 0.45 : 1,
-        depthWrite: k !== 'glass',
+        transparent: k === 'glass' || k === 'water' || k === 'screen',
+        opacity: { glass: 0.45, water: 0.45, screen: 0.55 }[k] ?? 1,
+        depthWrite: k !== 'glass' && k !== 'water' && k !== 'screen',
       });
     }
     M.ground = new THREE.MeshLambertMaterial({ color: 0xc5cdb5, transparent: true, opacity: 0.8, depthWrite: false });
@@ -505,7 +516,18 @@ export function makeMaterials(mode) {
     // weathered existing concrete and a new, smoother troweled slab
     M.concrete = patch(std({ color: 0xffffff, roughness: 0.93 }), { id: 'conc', tri: { tex: T.concrete, scale: 48, bump: 0.9 }, macro: [55, 0.28], rough: 0.08, weather: 1 });
     M.slab = patch(std({ color: 0xeceae6, roughness: 0.72 }), { id: 'slab', tri: { tex: T.concrete, scale: 72, bump: 0.25 }, macro: [70, 0.14], rough: 0.25 });
-    M.block = M.concrete;
+    // new hollow block: paler and cleaner than the old frame, deep texture
+    M.block = patch(std({ color: 0xf2efe8, roughness: 0.92 }), { id: 'block', tri: { tex: T.concrete, scale: 30, bump: 1.2 }, macro: [45, 0.12], rough: 0.08, weather: 0.35 });
+    M.mortar = patch(std({ color: 0xd8d3c8, roughness: 0.95 }), { id: 'mortar', tri: { tex: T.concrete, scale: 20, bump: 0.6 }, macro: [40, 0.1] });
+    M.fill = std({ color: 0xcdbd98, roughness: 1 });
+    M.ceramic = new THREE.MeshPhysicalMaterial({ vertexColors: true, color: 0xf6f6f2, roughness: 0.12, clearcoat: 1, clearcoatRoughness: 0.05 });
+    M.seat = std({ color: 0xeeeeea, roughness: 0.35 });
+    M.pvcPipe = std({ color: 0xe6e6df, roughness: 0.4 });
+    M.screen = new THREE.MeshStandardMaterial({ color: 0x1c2024, roughness: 0.8, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });
+    M.water = new THREE.MeshPhysicalMaterial({ color: 0x2c8f9c, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.72, depthWrite: false, envMapIntensity: 1.1 });
+    M.drum = std({ color: 0x1d4f9c, roughness: 0.5 });
+    M.bucket = std({ color: 0xe0661e, roughness: 0.55 });
+    M.rubber = std({ color: 0x1a1a1a, roughness: 0.8 });
     M.glass = new THREE.MeshPhysicalMaterial({ color: 0xe8efec, metalness: 0, roughness: 0.32, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.2 });
     M.alu = new THREE.MeshStandardMaterial({ color: 0xc9ccce, metalness: 1, roughness: 0.32 });
     M.steel = new THREE.MeshStandardMaterial({ color: 0xa4a8ab, metalness: 1, roughness: 0.42 });

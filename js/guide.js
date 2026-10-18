@@ -11,7 +11,7 @@ const saveDone = () => { try { localStorage.setItem(DONE_KEY, JSON.stringify(don
 // small HTML helpers for the guide text
 export const tip = (h) => `<div class="g-tip"><b>Tip</b>${h}</div>`;
 export const warn = (h) => `<div class="g-warn"><b>Careful</b>${h}</div>`;
-export const check = (items) => `<div class="g-check"><b>Check before you go on</b><ul>${items.map((x) => `<li>${x}</li>`).join('')}</ul></div>`;
+export const check = (items) => `<div class="g-check"><b>Check before you go on</b><ul>${items.filter(Boolean).map((x) => `<li>${x}</li>`).join('')}</ul></div>`;
 export const need = (items, title = 'You need for this part') => `<div class="g-need"><b>${title}</b><ul>${items.filter(Boolean).map((x) => `<li>${x}</li>`).join('')}</ul></div>`;
 export const figs = (...f) => `<div class="g-figs${f.length === 1 ? ' one' : ''}">${f.join('')}</div>`;
 export const ol = (items) => `<ol>${items.filter(Boolean).map((x) => `<li>${x}</li>`).join('')}</ol>`;

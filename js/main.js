@@ -2,7 +2,7 @@ import { design, DEFAULTS, STEP, WALL_KEYS, parseDoorBays, formatDoorBays } from
 import { computeBOM } from './bom.js';
 import { shippingLayout } from './shipping.js';
 import { Viewer } from './viewer.js';
-import { DEFAULT_PRICES, PLY, QUOTE } from './catalog.js';
+import { DEFAULT_PRICES, PLY, QUOTE, TANKS } from './catalog.js';
 import { ftin, inch, money, num } from './format.js';
 import { buildFields, syncFields } from './fields.js';
 import { renderBomDoc, bomTotal } from './bomview.js';
@@ -79,6 +79,14 @@ const ADV = [
       { k: 'sill', label: 'Window sill height', min: 12, max: 48, step: 1, fmt: ftin },
       { k: 'doorW', label: 'Door width', min: 24, max: 40, step: 1, fmt: inch },
       { k: 'doorH', label: 'Door height', min: 72, max: 84, step: 1, fmt: ftin },
+    ],
+  },
+  {
+    title: 'Screens & rainwater', open: false, fields: [
+      { k: 'screens', label: 'Insect screens', type: 'select', str: true, opts: [['yes', 'Windows and eaves'], ['no', 'None']], hint: 'A hinged screen frame inside every louvre, screen under the eaves, and the roof gaps sealed' },
+      { k: 'rainwater', label: 'Gutters and water tank', type: 'select', str: true, opts: [['yes', 'Yes'], ['no', 'No']] },
+      { k: 'tankGal', label: 'Tank size', type: 'select', opts: Object.entries(TANKS).map(([g, t]) => [g, `${g} gal (${inch(t.d)} × ${ftin(t.h)})`]), when: (p) => p.rainwater === 'yes', hint: 'The base is built as high as the gutters allow, so a shorter tank gets a higher tap' },
+      { k: 'tankEnd', label: 'Tank at', type: 'select', str: true, opts: [['right', 'Right end'], ['left', 'Left end']], when: (p) => p.rainwater === 'yes', hint: 'Seen from the front. The gutters fall toward this end.' },
     ],
   },
   {
@@ -308,7 +316,7 @@ $('#prevStep').addEventListener('click', () => { stop(); setStep(step - 1); });
 $('#nextStep').addEventListener('click', () => { stop(); setStep(step + 1); });
 {
   const ticks = $('#stepTicks');
-  const labels = { [STEP.FLOOR_PREP]: 'Floor', [STEP.PLATES]: 'Plates', [STEP.WALL_LONG]: 'Walls', [STEP.ROOF_FRAME]: 'Roof', [STEP.SIDING]: 'Siding', [STEP.INTERIOR]: 'Interior' };
+  const labels = { [STEP.FLOOR_PREP]: 'Floor', [STEP.PLATES]: 'Plates', [STEP.WALL_LONG]: 'Walls', [STEP.ROOF_FRAME]: 'Roof', [STEP.SIDING]: 'Siding', [STEP.INTERIOR]: 'Interior', [STEP.GUTTERS]: 'Water' };
   for (const [k, v] of Object.entries(labels)) {
     const sp = document.createElement('span');
     sp.textContent = v;
@@ -480,7 +488,8 @@ function renderNotes() {
     ['Closed door gaps', i.nCovered ? `${i.nCovered} (${WALL_KEYS.map((k) => D.doorGrid[k].map((b, j) => (b.covered ? `${k} bay ${j + 1}` : null)).filter(Boolean).join(', ')).filter(Boolean).join(', ')})` : 'None'],
     ['Windows', `${i.nWin} aluminium louvre windows, ${P.windowW}' × ${P.windowH}', at most ${ftin(P.winSpacing * 12)} apart, sill at ${ftin(i.sill)}`],
     ['Layout diagonal', ftin(i.diag)],
-    ['Rainwater', `≈ ${num(i.rainGal)} gal per inch of rain off ${num(i.roofPlanFt2)} sq ft of roof`],
+    ['Rainwater', `≈ ${num(i.rainGal)} gal per inch of rain off ${num(i.roofPlanFt2)} sq ft of roof${D.q.rain ? `, into a ${D.q.rain.tank.gal}-gal tank at the ${D.q.rain.wall} end on a ${ftin(D.q.rain.tank.base)} base` : ''}`],
+    ['Insect screens', D.q.screens ? `Hinged screen frames inside all ${i.nWin} louvres${D.q.screens.soffit.length ? ', screen under both eaves' : ''}, foam in the roof corrugations at the eaves and ridge, and blocks over the gables` : 'None'],
   ];
   const notes = [
     ['Building on the existing frame', 'The concrete outline, pony walls, columns and ring beam are already poured, so they are not in the bill of materials. Everything new is either wood fastened to that concrete or the roof sitting on it.'],
@@ -489,8 +498,13 @@ function renderNotes() {
     ['Infill panels', 'Each bay is framed separately and screwed to the concrete all round. Openings need no headers, because the ring beam spans over them.'],
     ['Water and the pony walls', 'The siding laps 1-1/2" down over the pony walls, so rain runs off onto concrete rather than into the wood. Put plastic or bitumen under every plate that touches concrete.'],
     ['Doors in the pony walls', 'The plan assumes a gap was left in the pony wall at each door. If not, the pony wall has to be cut out there, or a step built over it.'],
-    ['Windows & doors', `Doors are centred in bays between the columns. Windows fill the remaining bays, no more than ${ftin(P.winSpacing * 12)} apart. With louvres on all sides and open eaves, the house cross-ventilates from any direction.`],
-    ['Rainwater catchment', `The roof collects about ${num(i.rainGal)} gallons per inch of rain. Gutters on both eaves feeding a tank are strongly recommended (not in the BOM).`],
+    ['Windows & doors', `Doors are centred in bays between the columns. Windows fill the remaining bays, no more than ${ftin(P.winSpacing * 12)} apart. With louvres on all sides${P.screens === 'yes' ? ' and screened eaves' : ' and open eaves'}, the house cross-ventilates from any direction.`],
+    ['Rainwater catchment', D.q.rain
+      ? `The roof collects about ${num(i.rainGal)} gallons per inch of rain, so ${num(D.q.rain.tank.gal / i.rainGal, 1)}" of rain fills the ${D.q.rain.tank.gal}-gal tank. Gutters on both eaves fall toward the ${D.q.rain.wall} end, where the pipes meet over the tank. A first-flush chamber throws away the first ${num(D.q.rain.tank.ffGal, 1)} gal of each rain, which carries most of the dust and droppings off the roof. Boil or treat drinking water.`
+      : `The roof collects about ${num(i.rainGal)} gallons per inch of rain. Gutters on both eaves feeding a tank are strongly recommended: turn them on under "Screens & rainwater".`],
+    ['Insect screens', P.screens === 'yes'
+      ? 'Screens only work if every gap is closed. Each louvre gets a hinged screen frame inside (open it to reach the handle). The eaves are screened underneath, the corrugations at the eaves and ridge are filled with foam, and the gaps between the purlins over the gables are blocked. The doors are the only way in: keep them shut at dusk.'
+      : 'Not included. Screens keep out the mosquitoes that spread dengue, and make a big difference to sleep: turn them on under "Screens & rainwater".'],
     ['Metal vs PVC', 'Galvanised steel is cheaper but rusts in the salt air. PVC "tinroof" costs a little more but never rusts; pre-drill oversized holes for thermal movement.'],
   ];
   let h = `<h2>Design notes</h2>`;

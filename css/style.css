@@ -212,21 +212,21 @@ table.cmp td { width: 25%; }
   --g-wood: #ecd2a2; --g-wood-s: #9a7442; --g-wood2: #dcb97d; --g-hl: #f8b26a; --g-hl2: #fbd08f;
   --g-conc: #dedbd5; --g-conc-s: #8f8a82; --g-steel: #b5bcc4; --g-steel-s: #59616b; --g-earth: #ece0c2;
   --g-water: #b3dfe6; --g-ply: #f4e5c6; --g-tin: #6b7785; --g-pipe: #f1f1ee; --g-pipe-s: #6b7280;
-  --g-plastic: #7bb3d6; --g-mesh: #6b7280; --g-shot: #e7eef4;
+  --g-plastic: #7bb3d6; --g-mesh: #6b7280; --g-shot: #e7eef4; --g-screen: #30363d; --g-tank: #8fb79a; --g-tank-s: #2f5a3c;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --g-wood: #a88a5c; --g-wood-s: #e2c48f; --g-wood2: #8f7247; --g-hl: #c76d22; --g-hl2: #a6631f;
     --g-conc: #5d5b58; --g-conc-s: #a7a29a; --g-steel: #6d7680; --g-steel-s: #c4cbd3; --g-earth: #5a5040;
     --g-water: #2c5f69; --g-ply: #7e6b4c; --g-tin: #aab6c3; --g-pipe: #4a4e54; --g-pipe-s: #c9ced6;
-    --g-plastic: #3f7da6; --g-mesh: #b8bec6; --g-shot: #2a2e33;
+    --g-plastic: #3f7da6; --g-mesh: #b8bec6; --g-shot: #2a2e33; --g-screen: #c3cbd4; --g-tank: #3d6b4a; --g-tank-s: #a9d2b2;
   }
 }
 :root[data-theme="dark"] {
   --g-wood: #a88a5c; --g-wood-s: #e2c48f; --g-wood2: #8f7247; --g-hl: #c76d22; --g-hl2: #a6631f;
   --g-conc: #5d5b58; --g-conc-s: #a7a29a; --g-steel: #6d7680; --g-steel-s: #c4cbd3; --g-earth: #5a5040;
   --g-water: #2c5f69; --g-ply: #7e6b4c; --g-tin: #aab6c3; --g-pipe: #4a4e54; --g-pipe-s: #c9ced6;
-  --g-plastic: #3f7da6; --g-mesh: #b8bec6; --g-shot: #2a2e33;
+  --g-plastic: #3f7da6; --g-mesh: #b8bec6; --g-shot: #2a2e33; --g-screen: #c3cbd4; --g-tank: #3d6b4a; --g-tank-s: #a9d2b2;
 }
 .guide { max-width: 1040px; }
 .guide .lede { color: var(--ink); }
@@ -295,6 +295,7 @@ details.g-bay .gfig { border: 0; padding: 0; }
 /* drawing styles */
 .gd text { font-family: Inter, system-ui, sans-serif; font-size: 12px; fill: var(--ink); }
 .gd .lab { fill: var(--ink); }
+.gd .labh { fill: var(--ink); paint-order: stroke; stroke: var(--panel); stroke-width: 3.5px; stroke-linejoin: round; }
 .gd .note { fill: var(--muted); font-size: 11.5px; }
 .gd .ttl { font-weight: 700; font-size: 12.5px; fill: var(--ink); }
 .gd .dimt { font-weight: 600; font-size: 11.5px; fill: var(--ink); paint-order: stroke; stroke: var(--panel); stroke-width: 3.5px; stroke-linejoin: round; }
@@ -369,6 +370,13 @@ details.g-bay .gfig { border: 0; padding: 0; }
 .gd .screen { fill: url(#gScreen); stroke: var(--g-tin); stroke-width: 1; }
 .gd .alu { fill: #d5dbe0; stroke: #7a8590; stroke-width: 1; }
 .gd .ghost { fill: none; stroke: var(--muted); stroke-width: 1; stroke-dasharray: 4 3; }
+.gd .scr { stroke: var(--g-screen); stroke-width: 2.6; fill: none; stroke-dasharray: 2.5 1.5; }
+.gd .scr.hl { stroke: var(--accent); fill: none; }
+.gd .scrf { fill: var(--g-screen); fill-opacity: .14; stroke: var(--g-screen); stroke-width: 1; stroke-dasharray: 2 2; }
+.gd .foam { fill: #f3cf55; stroke: #b08a14; stroke-width: .8; }
+.gd .tankf { fill: var(--g-tank); stroke: var(--g-tank-s); stroke-width: 1.2; }
+.gd .pipe.hl { fill: var(--g-hl); stroke: var(--accent); }
+.gd .dirty { fill: #b08a5a; opacity: .8; }
 .gd .areafill { fill: var(--accent); fill-opacity: .08; stroke: var(--accent); stroke-width: 1; stroke-dasharray: 4 3; }
 @media print {
   .g-step { break-inside: avoid; }

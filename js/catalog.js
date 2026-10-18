@@ -106,7 +106,41 @@ export const DEFAULT_PRICES = {
   pipeStrap: { name: 'Galv. pipe strap 2"', price: 0.75, est: true },
   drum: { name: '55-gal plastic drum', price: 40.0, est: true },
   bucket: { name: '5-gal bucket with lid', price: 8.0, est: true },
+  // house: insect screens
+  screen48: { name: 'Fiberglass insect screen, 48" wide (per ft)', price: 2.0, est: true },
+  screen60: { name: 'Fiberglass insect screen, 60" wide (per ft)', price: 2.5, est: true },
+  cornerBrace: { name: '2" galv. flat corner brace with screws', price: 1.25, est: true },
+  screenHinge: { name: '2" galv. butt hinge with screws', price: 2.5, est: true },
+  // house: gutters, downpipes and rainwater tank
+  gutter: { name: 'PVC gutter 5", 10 ft', price: 18.0, est: true },
+  gutterJoin: { name: 'PVC gutter joiner', price: 5.0, est: true },
+  gutterEnd: { name: 'PVC gutter stop end', price: 4.0, est: true },
+  gutterOutlet: { name: 'PVC gutter drop outlet for 3" pipe', price: 9.0, est: true },
+  gutterBracket: { name: 'PVC gutter fascia bracket', price: 2.0, est: true },
+  screwSS: { name: '1-1/4" stainless wood screws (box of 100)', price: 10.0, est: true },
+  elbow3: { name: '3" PVC 90° elbow', price: 7.0, est: true },
+  tee3: { name: '3" PVC tee', price: 10.0, est: true },
+  ffCap: { name: '3" PVC cleanout adapter & threaded plug', price: 8.0, est: true },
+  pipeStrap3: { name: 'Galv. pipe strap 3"', price: 1.0, est: true },
+  tank300: { name: 'Poly water tank, 300 gal', price: 380.0, est: true },
+  tank500: { name: 'Poly water tank, 500 gal', price: 560.0, est: true },
+  tank800: { name: 'Poly water tank, 800 gal', price: 850.0, est: true },
+  tank1000: { name: 'Poly water tank, 1000 gal', price: 1050.0, est: true },
+  tank1500: { name: 'Poly water tank, 1500 gal', price: 1500.0, est: true },
+  tankTap: { name: '3/4" tank outlet fitting, 12" nipple & brass tap', price: 30.0, est: true },
 };
+
+// Vertical poly rainwater tanks: diameter and height (in), empty weight (lb).
+// Typical sizes; measure the one you buy and check it still fits.
+export const TANKS = {
+  300: { d: 38, h: 64, lb: 60 },
+  500: { d: 48, h: 68, lb: 95 },
+  800: { d: 60, h: 70, lb: 150 },
+  1000: { d: 64, h: 76, lb: 190 },
+  1500: { d: 87, h: 66, lb: 270 },
+};
+// Fiberglass screen comes in these roll widths (in)
+export const SCREEN_ROLLS = [36, 48, 60];
 
 // Shipping weights (lb) and sizes for stock items.
 export const LUMBER_DENSITY = 38; // lb per cubic foot (mixed imported lumber)

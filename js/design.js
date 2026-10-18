@@ -6,7 +6,7 @@
 // Y = up (ground = 0), Z = depth (back wall at z=0, front/door wall at z=D).
 
 import * as THREE from 'three';
-import { LUMBER, PLY, BAG_YIELD_FT3, MESH, QUOTE } from './catalog.js';
+import { LUMBER, PLY, BAG_YIELD_FT3, MESH, QUOTE, TANKS, PIPE_OD, BLOCK, SCREEN_ROLLS } from './catalog.js';
 import { ftin, inch, num } from './format.js';
 
 export const DEFAULTS = {
@@ -44,6 +44,12 @@ export const DEFAULTS = {
   windowH: 4,
   sill: 22,
   tinCover: 30,
+  // insect screens: hinged frames inside the louvres, screened eaves
+  screens: 'yes',
+  // gutters on both eaves into a tank at one gable end
+  rainwater: 'yes',
+  tankGal: 1000,
+  tankEnd: 'right',
   ovTin: 10,
   ovPly: 10,
   ovFraming: 10,
@@ -55,7 +61,7 @@ export const DEFAULTS = {
 
 export const STEP = {
   SITE: 0, FLOOR_PREP: 1, FLOOR: 2, PLATES: 3, WALL_LONG: 4, WALL_ENDS: 5, ROOF_FRAME: 6,
-  PURLINS: 7, ROOFING: 8, SIDING: 9, WINDOWS: 10, DOOR: 11, INTERIOR: 12, DONE: 13,
+  PURLINS: 7, ROOFING: 8, SIDING: 9, WINDOWS: 10, DOOR: 11, INTERIOR: 12, SCREENS: 13, GUTTERS: 14, TANK: 15, DONE: 16,
 };
 
 export const EX = 24; // explode unit, inches
@@ -264,6 +270,8 @@ export function design(P) {
   const warnings = [];
   const m = P.midPosts;
   const pw = 5.5; // 2x6 wall plate on the ring beam
+  const screensOn = P.screens === 'yes';
+  const rainOn = P.rainwater === 'yes';
   const yTop = y0 + ringTop + 1.5; // top of wall plate
 
   const rafterSpanH = D / 2 - pw;
@@ -755,6 +763,21 @@ export function design(P) {
         }
       }
     }
+    if (screensOn) {
+      // blocks between the purlins over each end rafter close the rake
+      // against insects (the gable sheets stop at the top of the rafter)
+      const bO = { ...purO, name: 'Blocking between purlins over the end rafter' };
+      for (const xc of [1.75, W - 1.75]) {
+        for (let j = 0; j + 1 < n; j++) {
+          const sa = sl.purlinS[j] + 1.75;
+          const sb = sl.purlinS[j + 1] - 1.75;
+          if (sb - sa < 2) continue;
+          const za = sl.zt + sl.dir * sa * cos;
+          const zb = sl.zt + sl.dir * sb * cos;
+          b.member(V(xc, rafterTop(za), za).addScaledVector(sl.nrm, 0.75), V(xc, rafterTop(zb), zb).addScaledVector(sl.nrm, 0.75), '2x4', V(1, 0, 0), bO);
+        }
+      }
+    }
     const yf = rafterTop(sl.zt);
     const fasO = { cat: 'framing', group: 'roof', step: STEP.ROOF_FRAME, ex: [0, 3.5 * EX, -sl.dir * 0.4 * EX], name: 'Fascia' };
     for (const [xa, xb] of splitRange(-R, W + R, rafterXs, 192)) {
@@ -1085,6 +1108,319 @@ export function design(P) {
     }
   }
 
+  // ---------------------------------------------------------------- insect screens
+  const scr = { windows: [], soffit: [], foamFt: 0, rollW: 0, soffitRoll: 0, fold: 0, soffitW: 0 };
+  const rollFor = (need) => SCREEN_ROLLS.find((r) => r >= need) || SCREEN_ROLLS[SCREEN_ROLLS.length - 1];
+  if (screensOn) {
+    // a hinged 1x3 frame inside every louvre, lapping 1-1/2" onto the
+    // plywood all round; it swings open to reach the louvre handle
+    const fd0 = 3.8;
+    const fd1 = fd0 + 0.75;
+    for (const w of Object.values(walls)) {
+      const sEx = wallEx(w, -1.4, 1.5);
+      const so = { cat: 'screens', group: 'screens', step: STEP.SCREENS, ex: sEx };
+      const hw = { mat: 'steel', group: 'screens', step: STEP.SCREENS, ex: sEx };
+      for (const o of w.openings) {
+        if (o.type !== 'window') continue;
+        const fa = o.u0 - 1.5;
+        const fc = o.u1 + 1.5;
+        const fb = o.v0 - 1.5;
+        const ft = o.v1 + 1.5;
+        const piece = (name, a, c, va, vc) => b.lumberBox('1x3', ...wallBox(w, a, c, va, vc, fd0, fd1), { ...so, name });
+        piece('Screen frame rail (1x3)', fa, fc, fb, fb + 2.5);
+        piece('Screen frame rail (1x3)', fa, fc, ft - 2.5, ft);
+        piece('Screen frame stile (1x3)', fa, fa + 2.5, fb + 2.5, ft - 2.5);
+        piece('Screen frame stile (1x3)', fc - 2.5, fc, fb + 2.5, ft - 2.5);
+        const sw = fc - fa - 1;
+        const sh = ft - fb - 1;
+        b.sheet(toW(w, fa + 0.5, fb + 0.5, fd0 - 0.04), w.U, UP, w.n, { w: sw, h: sh, corr: null }, {
+          mat: 'screen', name: 'Fiberglass insect screen, stapled to the back of the frame', info: `${ftin(sw)} × ${ftin(sh)}`, group: 'screens', step: STEP.SCREENS, ex: sEx,
+        });
+        scr.windows.push({ w: sw, h: sh, wall: w.key });
+        // hinges on the high-u side (the left, looking out from inside), a hook on the other
+        for (const v of [fb + 6, ft - 6]) {
+          b.box(...wallBox(w, fc - 1, fc, v - 1, v + 1, fd1, fd1 + 0.06), { ...hw, name: '2" butt hinge' });
+          b.box(...wallBox(w, fc, fc + 1, v - 1, v + 1, 3.75, 3.81), { ...hw, name: '2" butt hinge' });
+          const kp = toW(w, fc, v, fd1);
+          b.cyl(kp.x, kp.z, 0.14, y0 + v - 1, y0 + v + 1, { ...hw, name: '2" butt hinge' });
+        }
+        const vm = (fb + ft) / 2;
+        b.box(...wallBox(w, fa - 1.2, fa - 0.4, vm - 0.3, vm + 0.3, 3.75, fd1 + 0.2), { ...hw, name: 'Hook & eye' });
+        b.box(...wallBox(w, fa - 0.4, fa + 1.6, vm - 0.06, vm + 0.06, fd1 + 0.1, fd1 + 0.22), { ...hw, name: 'Hook & eye' });
+      }
+    }
+    if (scr.windows.length) scr.rollW = rollFor(Math.min(...scr.windows.map((x) => Math.min(x.w, x.h))));
+    if (scr.windows.some((x) => Math.min(x.w, x.h) > SCREEN_ROLLS[SCREEN_ROLLS.length - 1])) warnings.push('The window screens are wider than a 60" roll of screen; join two pieces on the frame.');
+    // screen under the rafter tails, from the fascia back to the wall, its
+    // back edge folded up onto the face of the wall plate
+    if (E >= 3) {
+      const fold = yTop - 0.4 - underside(0);
+      scr.fold = fold;
+      scr.soffitW = E / cos + fold + 1;
+      scr.soffitRoll = rollFor(scr.soffitW + 1);
+      for (const sl of slopes) {
+        const zw = sl.dir > 0 ? 0 : D;
+        const o = { mat: 'screen', group: 'screens', step: STEP.SCREENS, ex: [0, -0.6 * EX, -sl.dir * 0.8 * EX] };
+        const yAx = V(0, sin, sl.dir * cos);
+        const zAx = V(0, -cos, sl.dir * sin);
+        const xAx = new THREE.Vector3().crossVectors(yAx, zAx);
+        b.sheet(V(xAx.x > 0 ? 0 : W, underside(sl.zt) - 0.06, sl.zt), xAx, yAx, zAx, { w: W, h: E / cos, corr: null }, {
+          ...o, name: 'Fiberglass insect screen under the eave', info: `${ftin(W)} long, ${ftin(scr.soffitW)} wide with the folds`,
+        });
+        const zO = V(0, 0, -sl.dir);
+        const xO = new THREE.Vector3().crossVectors(UP, zO);
+        b.sheet(V(xO.x > 0 ? 0 : W, underside(zw) - 0.06, zw - sl.dir * 0.04), xO, UP, zO, { w: W, h: fold + 0.06, corr: null }, { ...o, name: 'Eave screen folded up onto the wall plate' });
+        scr.soffit.push({ len: W + 6, w: scr.soffitW, key: sl.key });
+      }
+    }
+    // canned foam in the corrugations along both eave purlins and under the ridge cap
+    scr.foamFt = (4 * (W + 2 * R)) / 12;
+  }
+
+  // ---------------------------------------------------------------- gutters, downpipes and the rainwater tank
+  const rain = { gutterPieces: [], joiners: 0, ends: 0, outlets: 0, brackets: 0, bracketXs: [], screws: 0, pipes: [], couplings: 0, elbows: 0, tees: 0, straps: 0, strapZs: [] };
+  let tank = null;
+  const rod = (a, c, r, o) => {
+    const dir = c.clone().sub(a);
+    const len = dir.length();
+    const q = new THREE.Quaternion().setFromUnitVectors(UP, dir.normalize());
+    return b.add({ kind: 'cyl', r, h: len, pos: a.clone().add(c).multiplyScalar(0.5).toArray(), quat: q.toArray(), ...o });
+  };
+  // a profile drawn in the (z, y) plane, relative to height ya at xa and yb at xb
+  const prismX = (pts, xa, xb, ya, yb, o) => {
+    if (xb < xa) [xa, xb, ya, yb] = [xb, xa, yb, ya];
+    const q = new THREE.Quaternion().setFromAxisAngle(V(0, 0, 1), Math.atan2(yb - ya, xb - xa)).multiply(new THREE.Quaternion().setFromAxisAngle(UP, Math.PI / 2));
+    return b.add({ kind: 'prism', pts: pts.map(([z, y]) => [-z, y]), depth: Math.hypot(xb - xa, yb - ya), pos: [xa, ya, 0], quat: q.toArray(), ...o });
+  };
+  if (rainOn) {
+    const sideR = P.tankEnd !== 'left';
+    const sx = sideR ? 1 : -1; // outward along x at the tank end
+    const tw = sideR ? walls.right : walls.left;
+    const xEnd = sideR ? W : 0;
+    const xFar = sideR ? -R : W + R; // high end of the gutters
+    const xNear = sideR ? W + R : -R;
+    const xo = xEnd + sx * 3.25; // downpipes and header, on 1-1/2" standoffs off the wall
+    const GR = 2.5; // 5" half-round gutter
+    const PR = PIPE_OD[3] / 2;
+    const gFall = 0.5 / 120; // gutters fall 1/2" every 10'
+    const pFall = 1 / 96; // pipes fall 1/8" per foot
+    const yf = rafterTop(-E);
+    const rimHi = yf - 0.75;
+    const rimLo = rimHi - gFall * Math.abs(xo - xFar);
+    // the short stub past the outlet is level
+    const rim = (x) => ((x - xo) * sx > 0 ? rimLo : rimHi - gFall * Math.abs(x - xFar));
+    const outletTop = rimLo - GR;
+    const yH0 = outletTop - 3 - PR; // header centre at the corners
+    const zg = slopes.map((sl) => sl.zt - sl.dir * (1 + GR)); // gutter centre lines [back, front]
+
+    // tank: on a square block base, clear of any door in that wall
+    const TK = TANKS[P.tankGal] || TANKS[1000];
+    const S = Math.ceil((TK.d + 12) / 16) * 16;
+    const doorZ = tw.openings.filter((o) => o.type === 'door').map((o) => {
+      const a = toW(tw, o.u0, 0, 0).z;
+      const c = toW(tw, o.u1, 0, 0).z;
+      return [Math.min(a, c), Math.max(a, c)];
+    });
+    const clear = (z) => !doorZ.some(([a, c]) => z + S / 2 + 6 > a && z - S / 2 - 6 < c);
+    const cands = [];
+    for (let z = Math.min(D / 2, S / 2 - E + 6); z <= Math.max(D / 2, D + E - S / 2 - 6); z += 2) cands.push(z);
+    cands.sort((a, c) => Math.abs(a - D / 2) - Math.abs(c - D / 2));
+    let zT = cands.find(clear);
+    if (zT === undefined) {
+      zT = D / 2;
+      warnings.push(`The water tank is in front of a door in the ${tw.key} end wall. Put the tank at the other end, or move the door.`);
+    }
+    const yHm = yH0 - pFall * Math.max(Math.abs(zT - zg[0]), Math.abs(zg[1] - zT));
+    const yHdr = (z) => {
+      const z0 = z < zT ? zg[0] : zg[1];
+      return yH0 + ((yHm - yH0) * Math.abs(z - z0)) / Math.max(1, Math.abs(zT - z0));
+    };
+    const xT = xEnd + sx * (12 + S / 2);
+    const xFF = xo + sx * 6;
+    const yOut = (x) => yHm - pFall * Math.abs(x - xo);
+    const yIn = yOut(xT) - PR - 3; // highest the top of the tank can be
+    const room = yIn - TK.h;
+    const k = Math.max(0, Math.min(3, Math.floor((room - 4) / 8)));
+    const slabT = Math.max(4, Math.min(5.5, Math.floor((room - 8 * k) * 4) / 4));
+    const base = 8 * k + slabT;
+    const tapH = base + 3;
+    if (room < 4) warnings.push(`A ${P.tankGal}-gal tank (${inch(TK.h)} tall) is too tall to fill from the gutters, which reach only ${ftin(yIn)} above the ground at the tank. Choose a smaller tank.`);
+    else if (tapH < 16) warnings.push(`The tank's tap is only ${inch(tapH)} off the ground, too low to fill a bucket under it. Use a short hose on the tap, or choose a shorter tank so its base can be higher.`);
+    for (const o of tw.openings) {
+      if (yHm - PR - y0 < o.v1 + (o.type === 'window' ? 3.5 : 1) && yH0 + PR - y0 > o.v0) {
+        warnings.push(`The rain pipe along the ${tw.key} end wall would cross a ${o.type} there. Put the tank at the other end${o.type === 'door' ? ', or move that door' : ''}.`);
+        break;
+      }
+    }
+
+    // gutters, outlets, brackets and downpipes
+    const gO = { mat: 'pvcPipe', group: 'gutters', step: STEP.GUTTERS, ex: [0, 0, 0] };
+    const arc = (r0, r1, zc, n = 14) => {
+      const pts = [];
+      for (let i = 0; i <= n; i++) { const t = Math.PI + (Math.PI * i) / n; pts.push([zc + r1 * Math.cos(t), r1 * Math.sin(t)]); }
+      for (let i = n; i >= 0; i--) { const t = Math.PI + (Math.PI * i) / n; pts.push([zc + r0 * Math.cos(t), r0 * Math.sin(t)]); }
+      return pts;
+    };
+    const disc = (r, zc, n = 14) => Array.from({ length: n + 1 }, (_, i) => { const t = Math.PI + (Math.PI * i) / n; return [zc + r * Math.cos(t), r * Math.sin(t)]; });
+    const fit = (p, dirs, o) => { for (const dv of dirs) rod(p.clone().addScaledVector(dv, -0.3), p.clone().addScaledVector(dv, 2.6), PR + 0.22, o); };
+    const pO = { mat: 'pvcPipe', group: 'gutters', step: STEP.GUTTERS, ex: [0, 0, 0] };
+    const pipeLen = (l) => {
+      // cut from 10' lengths, joined with couplings
+      const pcs = splitRange(0, l + 2, [], 120);
+      rain.couplings += pcs.length - 1;
+      for (const [s0, e0] of pcs) rain.pipes.push(e0 - s0);
+    };
+    const xLo = Math.min(xFar, xNear);
+    const xHi = Math.max(xFar, xNear);
+    const bxs = [xLo + 3, xHi - 3, ...rafterXs.filter((x) => x > xLo + 9 && x < xHi - 9)].sort((a, c) => a - c);
+    for (let i = 0; i + 1 < bxs.length; i++) if (bxs[i + 1] - bxs[i] > 30) bxs.splice(i + 1, 0, (bxs[i] + bxs[i + 1]) / 2);
+    rain.bracketXs = bxs;
+    slopes.forEach((sl, si) => {
+      const zc = zg[si];
+      const zFace = sl.zt - sl.dir * 0.75;
+      const pcs = splitRange(xLo, xHi, [], 120, !sideR);
+      for (const [s0, e0] of pcs) {
+        rain.gutterPieces.push(e0 - s0);
+        const cuts = [s0, e0];
+        if (xo > s0 + 0.5 && xo < e0 - 0.5) cuts.splice(1, 0, xo);
+        for (let i = 0; i + 1 < cuts.length; i++) {
+          prismX(arc(GR - 0.1, GR, zc), cuts[i], cuts[i + 1], rim(cuts[i]), rim(cuts[i + 1]), { ...gO, name: 'PVC gutter 5"', info: `piece ${ftin(e0 - s0)}` });
+        }
+      }
+      for (let i = 1; i < pcs.length; i++) {
+        const x = pcs[i][0];
+        prismX(arc(GR, GR + 0.15, zc), x - 1.5, x + 1.5, rim(x - 1.5), rim(x + 1.5), { ...gO, name: 'Gutter joiner' });
+        rain.joiners++;
+      }
+      for (const x of [xLo, xHi]) {
+        prismX(disc(GR, zc), x - 0.08, x + 0.08, rim(x), rim(x), { ...gO, name: 'Gutter stop end' });
+        rain.ends++;
+      }
+      b.cyl(xo, zc, PR + 0.25, outletTop - 2.5, outletTop + 0.3, { ...gO, name: 'Gutter drop outlet' });
+      rain.outlets++;
+      for (const x of bxs) {
+        const r0 = rim(x);
+        const [za, zb] = [zFace, zFace - sl.dir * 0.12].sort((a, c) => a - c);
+        b.box(x - 0.5, x + 0.5, r0 - 1.6, r0 + 0.4, za, zb, { ...gO, name: 'Gutter bracket' });
+        const [zc0, zc1] = [zFace, zc - sl.dir * (GR + 0.2)].sort((a, c) => a - c);
+        b.box(x - 0.5, x + 0.5, r0 + 0.25, r0 + 0.4, zc0, zc1, { ...gO, name: 'Gutter bracket' });
+        for (const dy of [-1.1, -0.1]) b.fasten('woodScrew', V(x, r0 + dy, zFace - sl.dir * 0.12), V(0, 0, -sl.dir), { group: 'gutters', step: STEP.GUTTERS, ex: [0, 0, 0], name: 'Stainless screw (gutter bracket)' });
+        rain.brackets++;
+        rain.screws += 2;
+      }
+      // downpipe from the outlet, elbow, then the header along the end wall
+      rod(V(xo, outletTop - 2, zc), V(xo, yH0, zc), PR, { ...pO, name: '3" PVC downpipe' });
+      const hd = V(0, yHm - yH0, zT - zc).normalize();
+      fit(V(xo, yH0, zc), [UP, hd], { ...pO, name: '3" PVC elbow' });
+      rain.elbows++;
+      rod(V(xo, yH0, zc), V(xo, yHm, zT), PR, { ...pO, name: '3" PVC rain header along the end wall', info: `falls ${inch(yH0 - yHm)} toward the tank` });
+      pipeLen(outletTop - 2 - yH0);
+      pipeLen(Math.abs(zT - zc));
+    });
+    // standoff blocks and straps on the end-wall columns
+    for (const [ca, cc] of tw.cols) {
+      const zm = toW(tw, (ca + cc) / 2, 0, 0).z;
+      const yh = yHdr(zm);
+      if (yh - y0 < PH + 4 || yh - y0 > Rb - 3) continue;
+      const [xa, xb] = [xEnd, xEnd + sx * 1.5].sort((a, c) => a - c);
+      b.lumberBox('2x4', xa, xb, yh - 2, yh + 2, zm - 1.75, zm + 1.75, { cat: 'framing', group: 'gutters', step: STEP.GUTTERS, ex: [0, 0, 0], name: 'Standoff block for the rain pipe' });
+      rod(V(xo, yh, zm - 0.4), V(xo, yh, zm + 0.4), PR + 0.06, { mat: 'steel', group: 'gutters', step: STEP.GUTTERS, ex: [0, 0, 0], name: 'Galv. pipe strap 3"' });
+      for (const dy of [-1.3, 1.3]) b.fasten('conScrew', V(xEnd + sx * 1.5, yh + dy, zm + 0.9), V(sx, 0, 0), { group: 'gutters', step: STEP.GUTTERS, ex: [0, 0, 0], name: 'Concrete screw 1/4" × 3-1/4"' });
+      rain.straps++;
+      rain.strapZs.push(zm);
+      rain.screws += 2;
+    }
+    const tee = V(xo, yHm, zT);
+    fit(tee, [V(0, 0, 1), V(0, 0, -1), V(sx, 0, 0)], { ...pO, name: '3" PVC tee where the two headers meet' });
+    rain.tees++;
+
+    // tank base: courses of 6" block round compacted fill, under a slab
+    const tO = { group: 'tank', step: STEP.TANK, ex: [0, 0, 0] };
+    const [px0, px1] = [xEnd + sx * 12, xEnd + sx * (12 + S)].sort((a, c) => a - c);
+    const pz0 = zT - S / 2;
+    const pz1 = zT + S / 2;
+    const blockPieces = [];
+    const bO = { ...tO, mat: 'block', name: '6" hollow concrete block' };
+    const bt = 5.625;
+    const run = (s0, s1, fn) => {
+      for (let s = s0; s < s1 - 0.5; s += BLOCK.len + BLOCK.joint) {
+        const e = Math.min(s + BLOCK.len, s1);
+        blockPieces.push(e - s);
+        fn(s, e);
+      }
+    };
+    for (let j = 0; j < k; j++) {
+      const ya = j * 8;
+      const yb = ya + BLOCK.h;
+      const xFull = j % 2 === 0;
+      for (const [za, zb] of [[pz0, pz0 + bt], [pz1 - bt, pz1]]) run(xFull ? px0 : px0 + 6, xFull ? px1 : px1 - 6, (s0, e0) => b.box(s0, e0, ya, yb, za, zb, bO));
+      for (const [xa, xb] of [[px0, px0 + bt], [px1 - bt, px1]]) run(xFull ? pz0 + 6 : pz0, xFull ? pz1 - 6 : pz1, (s0, e0) => b.box(xa, xb, ya, yb, s0, e0, bO));
+    }
+    if (k) b.box(px0 + bt, px1 - bt, 0, 8 * k, pz0 + bt, pz1 - bt, { ...tO, mat: 'fill', name: 'Compacted sand / coral fill inside the blocks' });
+    const ys = 8 * k;
+    const rebarPieces = [];
+    const nb = Math.floor((S - 6) / 12) + 1;
+    const rO = { ...tO, mat: 'rebar', name: '#4 rebar, 12" each way' };
+    for (let i = 0; i < nb; i++) {
+      const t = 3 + ((S - 6) * i) / (nb - 1);
+      b.box(px0 + 3, px1 - 3, ys + slabT / 2 - 0.5, ys + slabT / 2, pz0 + t - 0.25, pz0 + t + 0.25, rO);
+      b.box(px0 + t - 0.25, px0 + t + 0.25, ys + slabT / 2, ys + slabT / 2 + 0.5, pz0 + 3, pz1 - 3, rO);
+      rebarPieces.push(S - 6, S - 6);
+    }
+    b.box(px0, px1, ys, base, pz0, pz1, { ...tO, mat: 'slab', name: `Tank base slab, ${inch(slabT)} thick` });
+    for (let i = 0; i < 4; i++) b.lumber.push({ size: '2x6', len: S + 3, cat: 'tank', label: 'Tank base edge form (2x6)' });
+
+    // the tank, with a domed top
+    const tankO = { ...tO, mat: 'tank', name: `${P.tankGal}-gal poly water tank`, info: `${inch(TK.d)} across × ${ftin(TK.h)} tall; ${num(P.tankGal * 8.34)} lb of water when full` };
+    const r = TK.d / 2;
+    b.cyl(xT, zT, r, base, base + TK.h - 6, tankO);
+    b.cyl(xT, zT, r * 0.94, base + TK.h - 6, base + TK.h - 3.5, tankO);
+    b.cyl(xT, zT, r * 0.78, base + TK.h - 3.5, base + TK.h - 1.5, tankO);
+    b.cyl(xT, zT, r * 0.5, base + TK.h - 1.5, base + TK.h - 0.6, tankO);
+    b.cyl(xT, zT, 8, base + TK.h - 0.6, base + TK.h, { ...tO, mat: 'tank', name: 'Tank lid with inlet strainer' });
+    const tp = { ...tO, mat: 'pvcPipe' };
+    // out from the tee, over the first-flush chamber, to above the tank
+    rod(tee, V(xT, yOut(xT), zT), PR, { ...tp, name: '3" PVC pipe to the tank' });
+    pipeLen(Math.abs(xFF - xo));
+    pipeLen(Math.abs(xT - xFF));
+    fit(V(xFF, yOut(xFF), zT), [V(sx, 0, 0), V(-sx, 0, 0), UP.clone().negate()], { ...tp, name: '3" PVC tee for the first-flush chamber' });
+    rain.tees++;
+    rod(V(xFF, yOut(xFF), zT), V(xFF, 16, zT), PR, { ...tp, name: 'First-flush chamber', info: 'fills with the dirtiest water off the roof before any reaches the tank' });
+    pipeLen(yOut(xFF) - 16);
+    rod(V(xFF, 13.5, zT), V(xFF, 16.5, zT), PR + 0.3, { ...tp, name: 'Cleanout plug with a 1/8" drip hole' });
+    fit(V(xT, yOut(xT), zT), [V(sx, 0, 0), UP.clone().negate()], { ...tp, name: '3" PVC elbow' });
+    rain.elbows++;
+    if (yOut(xT) - (base + TK.h - 1) > 1) {
+      rod(V(xT, yOut(xT), zT), V(xT, base + TK.h - 1, zT), PR, { ...tp, name: '3" PVC pipe into the tank inlet' });
+      pipeLen(yOut(xT) - (base + TK.h - 1));
+    }
+    // overflow, screened, led down to the ground
+    const yOv = base + TK.h - 9;
+    const xOv = xT + sx * (S / 2 + 4);
+    rod(V(xT + sx * (r - 1), yOv, zT), V(xOv, yOv, zT), PR, { ...tp, name: 'Overflow pipe' });
+    fit(V(xOv, yOv, zT), [V(sx, 0, 0), UP.clone().negate()], { ...tp, name: '3" PVC elbow' });
+    rain.elbows++;
+    rod(V(xOv, yOv, zT), V(xOv, 4, zT), PR, { ...tp, name: 'Overflow pipe, down to the ground' });
+    rod(V(xOv, 3.6, zT), V(xOv, 4.1, zT), PR + 0.15, { ...tO, mat: 'screen', name: 'Insect screen tied over the overflow' });
+    pipeLen(Math.abs(xOv - xT) - r + 1);
+    pipeLen(yOv - 4);
+    // tap on a nipple that reaches past the edge of the base
+    const zTap = zT + S / 2 + 3;
+    rod(V(xT, tapH, zT + r - 1), V(xT, tapH, zTap), 0.53, { ...tO, mat: 'steel', name: '3/4" outlet fitting and nipple' });
+    b.box(xT - 0.6, xT + 0.6, tapH - 0.7, tapH + 1.6, zTap - 0.4, zTap + 0.9, { ...tO, mat: 'brass', name: 'Brass tap' });
+    rod(V(xT, tapH - 0.5, zTap + 0.6), V(xT, tapH - 2, zTap + 0.6), 0.35, { ...tO, mat: 'brass', name: 'Brass tap' });
+
+    const ffGal = (Math.PI * 1.52 ** 2 * (yOut(xFF) - 16)) / 231;
+    tank = {
+      gal: P.tankGal, d: TK.d, h: TK.h, lb: TK.lb, S, k, slabT, base, tapH, x: xT, z: zT, room, ffGal,
+      blocks: blockPieces, rebar: rebarPieces,
+      concreteFt3: (S * S * slabT) / 1728,
+      mortarFt3: blockPieces.length * 0.025,
+      fillFt3: k ? ((S - 2 * bt) ** 2 * 8 * k) / 1728 : 0,
+    };
+    Object.assign(rain, { sideR, sx, xEnd, xFar, xNear, xo, xFF, GR, PR, gFall, pFall, yf, rimHi, rimLo, outletTop, yH0, yHm, yIn, zg, wall: tw.key, plinth: { x0: px0, x1: px1, z0: pz0, z1: pz1 } });
+  }
+
   // ---------------------------------------------------------------- quantities
   // fastener counts are the hardware actually placed in the model
   b.flushHardware();
@@ -1127,13 +1463,22 @@ export function design(P) {
     { title: 'Infill the long walls', text: `Frame each bay between the columns. Studs at ${inch(P.studSpacing)} on centre are screwed to the columns at each end, with ${blockLevels.length} row${blockLevels.length > 1 ? 's' : ''} of flat blocking for the siding. Front wall: ${count('front', 'door')} doors, ${count('front', 'window')} windows. Back wall: ${count('back', 'door')} door${count('back', 'door') === 1 ? '' : 's'}, ${count('back', 'window')} windows. The ring beam carries the roof, so openings need only a flat 2x4 head, not a header.${covText}` },
     { title: 'Infill the end walls', text: `Frame the end-wall bays the same way: ${count('left', 'door')} door and ${count('left', 'window')} windows in each. The louvre rough opening is ${ftin(winRO.w)} × ${ftin(winRO.h)}, with the sill at ${ftin(sill)}. Windows are never more than ${ftin(S)} apart.` },
     { title: 'Roof framing', text: `Gable roof at ${P.pitch}:12. Set the 2x6 ridge on temporary props, then fit ${rafterXs.length} pairs of ${rafterSize} rafters at ${inch(P.rafterSpacing)} on centre. Each rafter is birdsmouthed onto the wall plate, plumb-cut at the tail for the fascia, and tied down with a hurricane tie. Add 2x4 ceiling ties on alternate pairs, nailed to the rafters at each wall${D > 192 ? '. A tie is longer than a 16\' board, so it comes in two pieces butted together, with a 4\' 2x4 scab nailed across the joint (12 nails, 6 each side)' : ''}. Frame the gable ends above the ring beam with studs.` },
-    { title: 'Purlins', text: `Nail 2x4 purlins flat across the rafters, ${slopes.map((s) => s.purlins).join(' + ')} rows at no more than ${inch(P.purlinSpacing)} apart, overhanging the gable ends by ${inch(R)}.` },
-    { title: 'Roofing', text: `Lay ${tinPieces.filter((t) => t.use === 'roof').length} pieces of ${clad === 'pvc' ? 'PVC' : 'galvanised metal'} sheet, starting at the end away from the prevailing wind. Lap one corrugation at the sides and ${inch(LAP)} at any end joints, and fasten through the crests. Finish with the ridge cap. Each inch of rain on the ${num(roofPlanFt2)} sq ft roof yields about ${num(rainGal)} gallons.` },
+    { title: 'Purlins', text: `Nail 2x4 purlins flat across the rafters, ${slopes.map((s) => s.purlins).join(' + ')} rows at no more than ${inch(P.purlinSpacing)} apart, overhanging the gable ends by ${inch(R)}.${screensOn ? ' Fill the gaps between the purlins over each end rafter with flat 2x4 blocks, so insects can\'t get in along the top of the gables.' : ''}` },
+    { title: 'Roofing', text: `Lay ${tinPieces.filter((t) => t.use === 'roof').length} pieces of ${clad === 'pvc' ? 'PVC' : 'galvanised metal'} sheet, starting at the end away from the prevailing wind. Lap one corrugation at the sides and ${inch(LAP)} at any end joints, and fasten through the crests.${screensOn ? ' Fill the corrugations over both eave purlins with canned foam as you go.' : ''} Finish with the ridge cap${screensOn ? ', with foam in the corrugations under both edges' : ''}. Each inch of rain on the ${num(roofPlanFt2)} sq ft roof yields about ${num(rainGal)} gallons.` },
     { title: 'Siding', text: `Clad each bay with vertical ${clad === 'pvc' ? 'PVC' : 'metal'} sheets from just below the pony-wall top up to the ring beam, lapping 1-1/2" over the concrete so water runs off. Closed door gaps get a lower sheet tucked behind the panel above. Clad the gable triangles above the ring beam too (${tinPieces.filter((t) => t.use === 'siding').length} pieces in total). Seal the joints where tin meets concrete.` },
     { title: 'Louvre windows', text: `Fit ${nWin} ${P.windowH}' aluminium louvre frames and ${winList.reduce((s, x) => s + x.blades, 0)} ${P.windowW}' glass blades, then trim with 1x4 casing.` },
     { title: 'Doors', text: `Hang ${nDoors} doors (${doorDesc}), each ${inch(P.doorW)} × ${ftin(leafH)}. Each sits in a gap in the pony wall. The 1x6 jambs are screwed to the concrete below and to the king studs above. Doors are vertical 1x6 boards with a 1x4 Z-brace, on three galvanised T-hinges, with a hasp.` },
     { title: 'Interior walls', text: `Line the inside of the infill panels with ${wallPlyPieces.length} pieces of ${PLY[P.wallPly].name}. The concrete columns, pony walls and ring beam stay exposed (paint them if you like). The roof space stays open for ventilation.` },
-    { title: 'Complete', text: `Finished: a ${ftin(W)} × ${ftin(D)} house on the existing concrete frame, with a gable ${clad === 'pvc' ? 'PVC' : 'metal'} roof, ${nWin} louvre windows and ${nDoors} doors. Recommended extras: insect screen behind the louvres, gutters and a water tank.` },
+    screensOn
+      ? { title: 'Insect screens', text: `Build ${scr.windows.length} hinged 1x3 screen frames and hang one inside each louvre window, over the plywood, so it swings open to reach the louvre handle.${scr.soffit.length ? ` Staple screen under the rafter tails along both eaves, from the fascia back to the wall, folding the back edge up onto the wall plate.` : ''} With the foam at the eaves and ridge and the blocks over the gables, insects can only get in through the doors.` }
+      : { title: 'Insect screens (not included)', text: 'No insect screens in this design. Turn them on under "Screens & rainwater" to add them.' },
+    rainOn
+      ? { title: 'Gutters', text: `Hang 5" PVC gutters on brackets along both eaves (${rain.brackets} brackets), falling 1/2" every 10' toward the ${rain.wall} end. At that end a drop outlet on each gutter feeds a 3" downpipe; the two pipes run along the ${rain.wall} end wall on standoff blocks and meet at a tee over the tank.` }
+      : { title: 'Gutters (not included)', text: 'No gutters in this design. Turn them on under "Screens & rainwater" to add them and the water tank.' },
+    rainOn
+      ? { title: 'Water tank', text: `Build a ${ftin(tank.S)} square base${tank.k ? ` of ${tank.k} course${tank.k > 1 ? 's' : ''} of 6" block filled with compacted coral, under` : ' from'} a ${inch(tank.slabT)} slab — ${ftin(tank.base)} high in all, so the top of the tank sits below the pipes. Set the ${tank.gal}-gal tank on it, with the pipe running in through a first-flush chamber that catches the dirtiest water off the roof. Fit the tap on a nipple that reaches past the edge of the base, and screen the overflow. Each inch of rain on the ${num(roofPlanFt2)} sq ft roof yields about ${num(rainGal)} gallons, so ${num(tank.gal / rainGal, 1)}" of rain fills the tank.` }
+      : { title: 'Water tank (not included)', text: 'Skipped.' },
+    { title: 'Complete', text: `Finished: a ${ftin(W)} × ${ftin(D)} house on the existing concrete frame, with a gable ${clad === 'pvc' ? 'PVC' : 'metal'} roof, ${nWin} louvre windows and ${nDoors} doors${screensOn ? ', insect screens' : ''}${rainOn ? `, and gutters feeding a ${tank.gal}-gal water tank` : ''}.${!screensOn || !rainOn ? ` Recommended extras: ${[!screensOn && 'insect screens', !rainOn && 'gutters and a water tank'].filter(Boolean).join(', ')}.` : ''}` },
   ];
 
   const dims = [
@@ -1143,15 +1488,20 @@ export function design(P) {
 
   return {
     P, W, D, parts: b.parts, steps, dims, warnings,
-    bounds: { min: [-R - 40, footBot, -E - 40], max: [W + R + 40, roofTop(D / 2) + 12, D + E + 40] },
+    bounds: {
+      min: [Math.min(-R - 40, rainOn ? rain.plinth.x0 - 40 : 0), footBot, -E - 40],
+      max: [Math.max(W + R + 40, rainOn ? rain.plinth.x1 + 40 : 0), roofTop(D / 2) + 12, D + E + 40],
+    },
     q: {
       lumber: b.lumber, wallPly: { type: P.wallPly, pieces: wallPlyPieces }, tin: tinPieces, ridgePieces, windows: winList,
       concreteFt3, cementNet, mesh, plasticFt2, sealFt, wedge, screws, ties, n16, n8, nTie, nPanel, roofFast, doors: nDoors,
+      screens: screensOn ? scr : null, rain: rainOn ? { ...rain, tank } : null,
     },
     // positions the step-by-step guide draws and measures from
     g: {
       y0, Pt, PH, C, Rb, ringTop, yTop, pw, E, R, pitch: P.pitch, p, cos, rd, zr, rafterSize, rafterLen, rafterXs, ridgeTop, ridgeBoards, tieXs,
-      blockLevels, winRO, doorRO, leafH, sill, nCols, tinW, sidingLog, mesh, meshDir, T,
+      blockLevels, winRO, doorRO, leafH, sill, nCols, tinW, sidingLog, mesh, meshDir, T, sin, underside, rafterTop,
+      scr: screensOn ? scr : null, rain: rainOn ? { ...rain, tank } : null,
       slopes: slopes.map((sl) => ({ key: sl.key, purlinS: sl.purlinS, top: sl.top, run: sl.run, Ls: sl.Ls })),
       purlinPieces: splitRange(-R, W + R, rafterXs, 192),
       walls: Object.fromEntries(Object.values(walls).map((w) => [w.key, {

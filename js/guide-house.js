@@ -9,6 +9,7 @@ import {
   Fig, figure, shotFig, lumberSizes, nailing, measureMark, squareCheck, levelPlumb, concreteScrew, wedgeAnchor,
   concreteMix, speedSquare, tinLap, washerTight, hurricaneTie, openingFraming, doorBuild, louvreWin,
 } from './guide-svg.js';
+import { extraShots, screenParts, rainParts, eaveFig } from './guide-house-extras.js';
 
 const WALL_NAME = { front: 'front', back: 'back', left: 'left end', right: 'right end' };
 const Cap = (s) => s[0].toUpperCase() + s.slice(1);
@@ -483,7 +484,12 @@ export function renderHouseGuide(host, { d, P, bom }) {
   const yT = g.yTop; // world top of the wall plate
 
   // ---------------------------------------------------------- 3D pictures
-  const whole = { min: [-g.R, 0, -g.E], max: [W + g.R, i.ridgeHeight, D + g.E] };
+  const rn = g.rain;
+  const sc = g.scr;
+  const whole = {
+    min: [rn && !rn.sideR ? rn.plinth.x0 : -g.R, 0, -g.E],
+    max: [rn && rn.sideR ? rn.plinth.x1 : W + g.R, i.ridgeHeight, D + g.E],
+  };
   const walls = { min: [0, 0, 0], max: [W, g.y0 + g.ringTop, D] };
   const shots = [
     { id: 'overview', step: STEP.DONE, box: whole, dir: [0.62, 0.42, 1] },
@@ -527,6 +533,8 @@ export function renderHouseGuide(host, { d, P, bom }) {
   const xr = g.rafterXs[2] ?? g.rafterXs[1];
   shots.push({ id: 'seat-close', step: STEP.ROOF_FRAME, dir: [0.55, 0.3, -1], box: { min: [xr - 13, g.y0 + g.Rb - 2, D - 16], max: [xr + 13, yT + 9, D + 1] } });
   const xm = g.rafterXs[Math.floor(nPairs / 2)];
+  if (sc && firstWin) wallShot('winscr-close', STEP.SCREENS, firstWin.wall, firstWin.u0 - 16, firstWin.u1 + 16, firstWin.v0 - 10, firstWin.v1 + 10, { inside: true, side: 0.25, up: 0.08, depth: 30 });
+  shots.push(...extraShots(d));
   shots.push({ id: 'ridge-close', step: STEP.ROOF_FRAME, dir: [0.55, -0.35, 0.9], box: { min: [xm - 34, g.ridgeTop - 24, D / 2 - 32], max: [xm + 34, g.ridgeTop + 2, D / 2 + 32] } });
 
   // ---------------------------------------------------------- text
@@ -547,7 +555,9 @@ export function renderHouseGuide(host, { d, P, bom }) {
     ['Caulk gun', 'for the sealant'],
     ['Ladders and sawhorses', 'two stepladders, one long ladder, two sawhorses, some planks'],
     ['Power', 'a small generator and extension cords, or cordless tools with spare batteries'],
-    ...(slab ? [['Concrete tools', 'shovels, a mixing tub or wheelbarrow, a hoe, six 5-gal buckets, a hand tamper, a straight 8\' 2x4, a wood float'], ['Water', 'a drum of fresh water for mixing and curing']] : []),
+    ...(sc ? [['Staple gun', 'with 3/8" stainless staples, for the insect screen']] : []),
+    ...(rn ? [['Hacksaw or PVC saw', 'for the pipes and gutters, and a file to clean the cut ends']] : []),
+    ...(slab || rn ? [['Concrete tools', 'shovels, a mixing tub or wheelbarrow, a hoe, six 5-gal buckets, a hand tamper, a straight 8\' 2x4, a wood float'], ['Water', 'a drum of fresh water for mixing and curing']] : []),
     ['Safety gear', 'safety glasses, ear protection, work gloves, dust masks, rubber gloves for concrete, a first-aid kit'],
   ];
   const gloss = [
@@ -577,6 +587,12 @@ export function renderHouseGuide(host, { d, P, bom }) {
     ['Lap', 'where one sheet overlaps the next'],
     ['Toenail', 'a nail driven at a slant through the side of one board into another'],
     ['Crown', 'the slight curve along most boards; put the hump up'],
+    ...(rn ? [
+      ['Gutter / downpipe', 'the channel along the eave that catches the rain / the pipe that carries it down'],
+      ['Fall', 'the gentle slope of a gutter or pipe, so water runs one way'],
+      ['Header', 'the pipe along the end wall that brings the water from both gutters to the tank'],
+      ['First flush', 'a pipe that catches the first, dirtiest water off the roof so it doesn\'t go into the tank'],
+    ] : []),
   ];
 
   const parts = [];
@@ -600,7 +616,9 @@ export function renderHouseGuide(host, { d, P, bom }) {
           'a 2x6 wood plate bolted on top of the ring beam;',
           `a wood frame in each of the ${wallBayCount} bays between the columns, with ${plural(nWin, 'window')} and ${plural(nDoors, 'door')};`,
           `the roof: ${plural(nPairs * 2, 'rafter')} on the plate, purlins across them and ${clad} sheets on top;`,
-          `${clad} sheets on the outside of the walls and ${PLY[P.wallPly].name} on the inside.`,
+          `${clad} sheets on the outside of the walls and ${PLY[P.wallPly].name} on the inside${sc || rn ? ';' : '.'}`,
+          sc ? `insect screens: a hinged screen inside every window, and screen under the eaves${rn ? ';' : '.'}` : null,
+          rn ? `gutters on both eaves, and a ${rn.tank.gal}-gal water tank on a block base at the ${rn.wall} end.` : null,
         ])}
         ${figs(shotFig('overview', `<b>The finished house</b>, ${ftin(W)} × ${ftin(D)}.`))}${figs(figure(wallSectionFig(d, P), '<b>Section through a wall</b>: how all the layers fit together, from the floor to the roof. Heights on the left are from the floor.', 'wide'))}` },
       { title: 'Tools', html: `<p>Get these together before you start. Most of the work is cutting, nailing and drilling into concrete.</p><div class="g-tools">${tools.map(([a, b]) => `<div><b>${a}</b><span>${b}</span></div>`).join('')}</div>` },
@@ -874,6 +892,12 @@ export function renderHouseGuide(host, { d, P, bom }) {
         'Start at the bottom row (by the fascia) and work up; the rows below are your ladder. Step only on the rafters and purlins.',
       ])}${figs(shotFig('purlins', '<b>Purlins</b> on both slopes.'))}${cutList(/^Purlin/, 'Purlins')}
       ${check(['Every purlin straight (check with a string) and nailed at every rafter.'])}` },
+      ...(sc ? [{ title: 'Block the gables', html: `${ol([
+        'Over each end rafter, the gaps between the purlins are open to the outside: the gable sheets stop at the top of the rafter, and the roof sheets sit on the purlins above. Insects (and wind-blown rain) get in there.',
+        'Fill each gap with a 2x4 laid flat on top of the end rafter, between the two purlins, its outside edge flush with the outside of the rafter.',
+        'Cut each block to fit snugly between the purlins and toenail it to the rafter with two 16d nails.',
+        'Do both slopes at both gables, from the fascia up to the ridge.',
+      ])}${figs(shotFig('rake-close', '<b>Blocks between the purlins</b> over the end rafter make a solid strip along the top of the gable.'))}${cutList(/^Blocking between purlins/, 'Gable blocks')}` }] : []),
     ],
   });
 
@@ -901,6 +925,14 @@ export function renderHouseGuide(host, { d, P, bom }) {
       ${figs(shotFig('roofing', '<b>The roof sheeted</b>, with the ridge cap.'), shotFig('roofing-close', '<b>At the eave</b>: sheets overhanging the fascia, screws along each purlin.'))}
       ${warn('Walk only along the lines of screws (that is where the purlins are), wear soft-soled shoes, and keep off the roof when it is wet or windy.')}
       ${check(['Every sheet screwed at every purlin.', 'No screw holes missed or left empty (fill a mistake with a screw and washer).', 'Ridge cap on and screwed.'])}` },
+      ...(sc ? [{ title: 'Seal the eaves and the ridge', html: `${need([`${buy('foam')} cans of window & door foam (the low-expansion kind)`, 'gloves and a ladder', 'a utility knife'])}
+        ${ol([
+          'Along each eave, the sheets sit on the bottom purlin, and every corrugation leaves a hole above it: room for a mosquito, a wasp or a gecko.',
+          'From a ladder, spray a little foam into the hole under every crest, over the purlin, along both eaves. Push the straw in about 1" so the foam fills the hole without bulging out.',
+          'Do the same under both edges of the ridge cap, from the roof.',
+          'When it has set (an hour or so), cut off anything that sticks out with the knife.',
+        ])}${figs(figure(eaveFig(d, 'screen'), '<b>Section through the eave</b>: foam over the eave purlin, and the screen you will add under the rafters later.'))}
+        ${tip('Use only a little at a time: this foam grows as it sets. Try a few holes, wait ten minutes, and see how much it grew.')}` }] : []),
     ],
   });
 
@@ -945,7 +977,7 @@ export function renderHouseGuide(host, { d, P, bom }) {
           'Close the handle and slide the glass blades into the clips, starting at the bottom. Open and close the handle: all the blades should move together and close tightly.',
           'Nail a 1x4 casing round the outside of the opening (head, both sides and sill), over the cut edge of the sheet, with 8d nails every 16".',
         ])}${figs(figure(louvreWin({ roW: g.winRO.w, roH: g.winRO.h, frameH: P.windowH * 12, bladeW: P.windowW * 12 }), 'A louvre window in its opening.'), shotFig('win-close', '<b>A window fitted</b>, with its casing.'))}
-        ${tip('Glass blades break easily. Leave them in their box until the frames are in, and carry them on edge.')}` },
+        ${tip('Glass blades break easily. Leave them in their box until the frames are in, and carry them on edge.')}${sc ? tip('The insect screens go on inside, over the plywood, once the walls are lined (see <b>Insect screens</b>).') : ''}` },
     ],
   });
 
@@ -997,7 +1029,11 @@ export function renderHouseGuide(host, { d, P, bom }) {
     ],
   });
 
-  // ----- part 12: finish
+  // ----- screens, gutters and tank
+  const ctx = { d, P, bom, buy, cutList };
+  parts.push(...screenParts(ctx), ...rainParts(ctx));
+
+  // ----- finish
   parts.push({
     id: 'finish', title: 'Finish and check', intro: 'A last walk round, and the extras worth adding.',
     steps: [
@@ -1006,13 +1042,15 @@ export function renderHouseGuide(host, { d, P, bom }) {
         'After the first heavy rain, look for drips and damp patches, especially at the laps, the ridge and the windows.',
         'Every hurricane tie fully nailed and every wedge anchor tight.',
         'All windows open and close; all doors swing freely and lock.',
+        sc ? 'Every window screen closes flat, and no light shows through the eaves when you look up from inside at dusk.' : null,
+        rn ? 'After the first heavy rain: the gutters empty, nothing leaks, and the first flush filled before the tank did.' : null,
         'Offcuts, nails and sheet scraps picked up: a nail in the foot goes bad fast in the tropics.',
       ])}${figs(shotFig('done', '<b>The finished house</b>, from the back.'))}` },
       { title: 'Worth adding', html: ul([
-        `<b>Gutters and a water tank.</b> The roof collects about ${num(i.rainGal)} gallons of rain for every inch that falls.`,
-        '<b>Insect screen</b> behind the louvres.',
+        rn ? null : `<b>Gutters and a water tank.</b> The roof collects about ${num(i.rainGal)} gallons of rain for every inch that falls. Turn them on under <b>Screens &amp; rainwater</b>.`,
+        sc ? '<b>A screen door</b> on the door you use most, so it can stand open in the day.' : '<b>Insect screens</b> inside the louvres and under the eaves. Turn them on under <b>Screens &amp; rainwater</b>.',
         '<b>Paint</b> on the outside of the trim and doors to make the wood last.',
-        '<b>Once a year</b>, and after every storm: check for loose roof screws, re-seal joints, and look at the hurricane ties.',
+        `<b>Once a year</b>, and after every storm: check for loose roof screws, re-seal joints, and look at the hurricane ties${rn ? '; clean the gutters every month' : ''}.`,
       ]) },
     ],
   });

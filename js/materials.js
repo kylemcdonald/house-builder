@@ -459,6 +459,7 @@ const SKETCH = {
   screen: 0x2f3438,
   water: 0x3a9fb0,
   drum: 0x1f5fa8,
+  tank: 0x3d6b4a,
   bucket: 0xe8742a,
   rubber: 0x2a2a2a,
 };
@@ -526,6 +527,7 @@ export function makeMaterials(mode) {
     M.screen = new THREE.MeshStandardMaterial({ color: 0x1c2024, roughness: 0.8, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false });
     M.water = new THREE.MeshPhysicalMaterial({ color: 0x2c8f9c, roughness: 0.06, metalness: 0, transparent: true, opacity: 0.72, depthWrite: false, envMapIntensity: 1.1 });
     M.drum = std({ color: 0x1d4f9c, roughness: 0.5 });
+    M.tank = std({ color: 0x2f5a3c, roughness: 0.6 });
     M.bucket = std({ color: 0xe0661e, roughness: 0.55 });
     M.rubber = std({ color: 0x1a1a1a, roughness: 0.8 });
     M.glass = new THREE.MeshPhysicalMaterial({ color: 0xe8efec, metalness: 0, roughness: 0.32, transparent: true, opacity: 0.62, side: THREE.DoubleSide, depthWrite: false, envMapIntensity: 1.2 });

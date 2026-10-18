@@ -1,6 +1,6 @@
 // Lays every purchased item out flat, bundled the way it would be strapped
 // for the ferry, and reports bundle sizes, volumes and weights.
-import { LUMBER, PLY, BLOCK, PIPE_OD } from './catalog.js';
+import { LUMBER, PLY, BLOCK, PIPE_OD, TANKS } from './catalog.js';
 import { ftin, num } from './format.js';
 
 const CORR = { pitch: 3, depth: 0.75 };
@@ -68,7 +68,8 @@ export function shippingLayout(bom, P) {
       },
     });
   }
-  const cement = bom.lines.find((x) => x.key === 'cement');
+  const cementLines = bom.lines.filter((x) => x.key === 'cement');
+  const cement = cementLines.length ? { buy: cementLines.reduce((t, l) => t + l.buy, 0), lb: cementLines.reduce((t, l) => t + l.lb, 0) } : null;
   if (cement) {
     // pallets of up to 60 bags (10 layers of 6)
     let left = cement.buy;
@@ -197,9 +198,33 @@ export function shippingLayout(bom, P) {
       draw(x, z) { parts.push({ id: id++, kind: 'cyl', r: 11.25, h: 34.5, pos: [x + 11.5, 17.25, z + 11.5], quat: null, mat: 'drum', name: drum.name, info: 'bucket, fittings and screen packed inside' }); },
     });
   }
+  const gutter = bom.lines.find((x) => x.key === 'gutter');
+  if (gutter) {
+    // 10' lengths of 5" half-round, nested in stacks of up to 6
+    const n = gutter.buy;
+    const stacks = Math.ceil(n / 6);
+    gens.push({
+      name: 'PVC gutters (nested)', qty: `${n} lengths`, L: 120, Wd: stacks * 5.5, H: 3 + Math.min(n, 6) * 0.4, lb: gutter.lb,
+      draw(x, z) {
+        for (let i = 0; i < n; i++) {
+          const st = i % stacks;
+          const lv = Math.floor(i / stacks);
+          box(x, x + 120, lv * 0.4, lv * 0.4 + 2.6, z + st * 5.5, z + st * 5.5 + 5, 'pvcPipe', gutter.name, `length ${i + 1} of ${n}`);
+        }
+      },
+    });
+  }
+  const tank = bom.lines.find((x) => /^tank\d+$/.test(x.key));
+  if (tank) {
+    const t = TANKS[Number(tank.key.slice(4))];
+    gens.push({
+      name: tank.name, qty: '1 (pack the fittings, brackets and screen inside)', L: t.d, Wd: t.d, H: t.h, lb: tank.lb,
+      draw(x, z) { parts.push({ id: id++, kind: 'cyl', r: t.d / 2, h: t.h, pos: [x + t.d / 2, t.h / 2, z + t.d / 2], quat: null, mat: 'tank', name: tank.name, info: 'gutter brackets, fittings and screen packed inside' }); },
+    });
+  }
   // everything else is small: nails, fasteners, anchors, ties, hinges,
   // sealant, fittings and screen go in cartons
-  const big = (k) => /^L|^(metal|pvc)\d+$|^ridge|^pipe\d$|^(cement|mesh|plastic|block|rebar|toilet|drum)$|^louvre/.test(k) || PLY[k];
+  const big = (k) => /^L|^(metal|pvc)\d+$|^ridge|^pipe\d$|^(cement|mesh|plastic|block|rebar|toilet|drum|gutter)$|^tank\d+$|^louvre/.test(k) || PLY[k];
   const hw = bom.lines.filter((x) => !big(x.key) && !x.local);
   if (hw.length) {
     const lb = hw.reduce((s, l) => s + l.lb, 0);

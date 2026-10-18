@@ -60,7 +60,7 @@ export function renderBomDoc(host, o) {
   for (const c of b.cuts) {
     const used = c.boards.reduce((s, bd) => s + bd.pieces.reduce((a, p) => a + p.len, 0), 0);
     const eff = (used / (c.boards.length * c.stock)) * 100;
-    const unit = c.cat === 'pipe' ? 'lengths' : c.cat === 'rebar' ? 'bars' : c.cat === 'mesh' ? 'rolls' : 'boards';
+    const unit = c.cat === 'pipe' || c.cat === 'gutter' ? 'lengths' : c.cat === 'rebar' ? 'bars' : c.cat === 'mesh' ? 'rolls' : 'boards';
     h += `<h4 style="margin:14px 0 6px">${c.section} — ${c.size} × ${ftin(c.stock)} · ${c.boards.length} ${unit} · ${num(eff)}% yield</h4><div class="cutlist">`;
     c.boards.forEach((bd, i) => {
       h += `<div class="cut-row"><span class="lab">#${i + 1}</span><div class="cut-bar">`;

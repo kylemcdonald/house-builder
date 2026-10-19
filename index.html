@@ -28,6 +28,7 @@
       </div>
     </div>
     <nav class="tabs" role="tablist">
+      <button class="tab" data-mode="all">All</button>
       <button class="tab active" data-mode="house">House</button>
       <button class="tab" data-mode="toilet">Toilet House</button>
       <button class="tab" data-mode="photos">Photos</button>
@@ -75,6 +76,30 @@
     </aside>
 
     <section class="content">
+      <!-- both designs together -->
+      <div class="pane" id="pane-all">
+        <div class="subtabs seg small" id="allTabs">
+          <button data-sub="ship" class="on">Shipping Layout</button>
+          <button data-sub="bom">Bill of Materials</button>
+        </div>
+        <div class="tpane active" id="apane-ship">
+          <div class="ship-wrap">
+            <div class="viewport" id="aShipViewport">
+              <div class="toolbar">
+                <div class="seg small" id="renderSeg5">
+                  <button data-v="sketch" class="on">SketchUp</button>
+                  <button data-v="real">Realistic</button>
+                </div>
+              </div>
+            </div>
+            <div class="ship-table" id="aShipTable"></div>
+          </div>
+        </div>
+        <div class="tpane scroll" id="apane-bom">
+          <div class="doc" id="aBomDoc"></div>
+        </div>
+      </div>
+
       <!-- house -->
       <div class="pane active" id="pane-house">
         <div class="subtabs seg small" id="houseTabs">
@@ -153,6 +178,7 @@
           <button data-sub="model" class="on">3D Model</button>
           <button data-sub="guide">Step-by-step</button>
           <button data-sub="waste">Waste system</button>
+          <button data-sub="ship">Shipping Layout</button>
           <button data-sub="bom">Bill of Materials</button>
           <button data-sub="notes">Design Notes</button>
         </div>
@@ -190,6 +216,19 @@
         </div>
         <div class="tpane scroll" id="tpane-guide"><div class="doc" id="tGuideDoc"></div></div>
         <div class="tpane scroll" id="tpane-waste"><div class="doc" id="tWasteDoc"></div></div>
+        <div class="tpane" id="tpane-ship">
+          <div class="ship-wrap">
+            <div class="viewport" id="tShipViewport">
+              <div class="toolbar">
+                <div class="seg small" id="renderSeg4">
+                  <button data-v="sketch" class="on">SketchUp</button>
+                  <button data-v="real">Realistic</button>
+                </div>
+              </div>
+            </div>
+            <div class="ship-table" id="tShipTable"></div>
+          </div>
+        </div>
         <div class="tpane scroll" id="tpane-bom"><div class="doc" id="tBomDoc"></div></div>
         <div class="tpane scroll" id="tpane-notes"><div class="doc" id="tNotesDoc"></div></div>
       </div>

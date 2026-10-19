@@ -1,11 +1,11 @@
 // The Toilet House tab: its sidebar, 3D model with construction playback,
-// waste-system write-up, bill of materials and design notes.
+// waste-system write-up, shipping layout, bill of materials and design notes.
 import { toiletDesign, TDEFAULTS, TSTEP } from './toilet.js';
 import { computeToiletBOM } from './bom.js';
 import { shippingLayout } from './shipping.js';
 import { Viewer } from './viewer.js';
 import { buildFields, syncFields } from './fields.js';
-import { renderBomDoc, bomTotal } from './bomview.js';
+import { renderBomDoc, renderShipDoc, bomTotal } from './bomview.js';
 import { ftin, inch, money, num } from './format.js';
 import { renderToiletGuide } from './guide-toilet.js';
 
@@ -87,6 +87,8 @@ export function createToiletUI(o) {
   let BOM = null;
   let SHIP = null;
   let viewer = null;
+  let shipViewer = null;
+  let shipDirty = true;
   let step = TSTEP.DONE;
   let sub = 'model';
   let active = false;
@@ -107,6 +109,8 @@ export function createToiletUI(o) {
   function computeBOM() {
     BOM = computeToiletBOM(D, P, o.prices, { houseMeshSpareFt: o.houseMeshSpare() });
     SHIP = shippingLayout(BOM, P);
+    shipDirty = true;
+    updateShip();
   }
 
   function regenerate() {
@@ -140,6 +144,23 @@ export function createToiletUI(o) {
     viewer.setModel({ parts: D.parts, bounds: D.bounds, dims: D.dims });
     viewer.setStep(step, TSTEP.DONE);
     viewer.setDims($('#tDimsChk').checked);
+  }
+
+  // the shipping layout is only rebuilt while it is on screen
+  function updateShip() {
+    if (!SHIP || !active || sub !== 'ship') return;
+    if (!shipViewer) {
+      shipViewer = new Viewer($('#tShipViewport'));
+      shipViewer.setMode(o.getMode());
+    }
+    if (shipDirty) {
+      shipViewer.setModel({ parts: SHIP.parts, bounds: SHIP.bounds, labels: SHIP.labels }, { fit: true, dir: [0.25, 1.3, 0.9] });
+      shipViewer.setStep(Infinity, Infinity);
+      renderShipDoc($('#tShipTable'), SHIP);
+      shipDirty = false;
+    }
+    shipViewer.active = true;
+    shipViewer.resize();
   }
 
   // ---------------------------------------------------------------- 3D view & playback
@@ -213,8 +234,10 @@ export function createToiletUI(o) {
     $$('#toiletTabs button').forEach((x) => x.classList.toggle('on', x.dataset.sub === sub));
     $$('#pane-toilet .tpane').forEach((p) => p.classList.toggle('active', p.id === 'tpane-' + sub));
     if (viewer) viewer.active = active && sub === 'model';
+    if (shipViewer) shipViewer.active = active && sub === 'ship';
     if (sub === 'model' && active) requestAnimationFrame(() => { ensureViewer(); viewer.active = true; viewer.resize(); });
     if (sub === 'guide') requestAnimationFrame(updateGuide);
+    if (sub === 'ship') requestAnimationFrame(updateShip);
   }
   showSub(o.sub);
   $$('#toiletTabs button').forEach((bt) => bt.addEventListener('click', () => { showSub(bt.dataset.sub); o.onSub(sub); }));
@@ -329,7 +352,7 @@ export function createToiletUI(o) {
     regenerate,
     refreshBOM() { if (!D) return; computeBOM(); renderBOM(); renderWaste(); o.onChange(); },
     sync() { syncFields(GROUPS, P, 't'); },
-    setMode(m) { if (viewer) viewer.setMode(m); },
+    setMode(m) { if (viewer) viewer.setMode(m); if (shipViewer) shipViewer.setMode(m); },
     setActive(on) {
       active = on;
       if (on) {
@@ -337,7 +360,11 @@ export function createToiletUI(o) {
           requestAnimationFrame(() => { ensureViewer(); viewer.active = true; viewer.resize(); });
         }
         if (sub === 'guide') requestAnimationFrame(updateGuide);
-      } else if (viewer) viewer.active = false;
+        if (sub === 'ship') requestAnimationFrame(updateShip);
+      } else {
+        if (viewer) viewer.active = false;
+        if (shipViewer) shipViewer.active = false;
+      }
     },
     total() { return D ? bomTotal(BOM, P, SHIP) : 0; },
     subtitle() { return D ? `${ftin(D.W)} × ${ftin(D.D)} toilet house · ${P.waste === 'pit' ? 'pit' : `${P.outfall} ft seawater outfall`}` : ''; },
@@ -347,7 +374,7 @@ export function createToiletUI(o) {
       if (e.key === 'ArrowLeft') { stop(); setStep(step - 1); }
       if (e.key === ' ') { e.preventDefault(); play(); }
     },
-    get D() { return D; }, get BOM() { return BOM; }, get viewer() { return viewer; }, setStep,
+    get D() { return D; }, get BOM() { return BOM; }, get SHIP() { return SHIP; }, get viewer() { return viewer; }, setStep,
   };
 }
 

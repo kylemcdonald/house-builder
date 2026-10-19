@@ -6,6 +6,12 @@ import { ftin, num } from './format.js';
 const CORR = { pitch: 3, depth: 0.75 };
 
 export function shippingLayout(bom, P) {
+  return combinedShippingLayout([{ bom, P }]);
+}
+
+// Bundles from several designs laid out together on one deck. A design with
+// a label has it put in front of each of its bundle names.
+export function combinedShippingLayout(designs) {
   const parts = [];
   const labels = [];
   const bundles = [];
@@ -15,226 +21,230 @@ export function shippingLayout(bom, P) {
 
   // Collect bundle generators: each returns {L, Wd, H, draw(x, z)}
   const gens = [];
-  const lumber = {};
-  for (const l of bom.lines) if (l.key.startsWith('L')) lumber[l.key.slice(1)] = (lumber[l.key.slice(1)] || 0) + l.buy;
-  for (const [size, n] of Object.entries(lumber)) {
-    const { t, w, stock } = LUMBER[size];
-    const cols = Math.max(1, Math.round(Math.sqrt((n * t) / w)));
-    const layers = Math.ceil(n / cols);
-    const lb = bom.lines.filter((l) => l.key === 'L' + size).reduce((s, l) => s + l.lb, 0);
-    gens.push({
-      name: `${size}x${stock / 12} lumber`, qty: `${n} boards`, L: stock, Wd: cols * w, H: layers * t, lb,
-      draw(x, z) {
-        for (let i = 0; i < n; i++) {
-          const c = i % cols;
-          const r = Math.floor(i / cols);
-          box(x, x + stock, r * t, (r + 1) * t - 0.02, z + c * w, z + (c + 1) * w - 0.05, 'wood', `${size} × ${ftin(stock)}`, `board ${i + 1} of ${n}`);
-        }
-      },
-    });
-  }
-  for (const l of bom.lines.filter((x) => PLY[x.key])) {
-    const t = PLY[l.key].t;
-    const n = l.buy;
-    gens.push({
-      name: PLY[l.key].name, qty: `${n} sheets`, L: 96, Wd: 48, H: n * t, lb: l.lb,
-      draw(x, z) {
-        for (let i = 0; i < n; i++) box(x, x + 96, i * t, (i + 1) * t - 0.01, z, z + 48, 'plyFloor', PLY[l.key].name, `sheet ${i + 1} of ${n}`);
-      },
-    });
-  }
-  const tinMat = P.cladding === 'pvc' ? 'pvc' : 'tin';
-  for (const l of bom.lines.filter((x) => /^(metal|pvc)\d+$/.test(x.key))) {
-    const L = Number(l.key.match(/\d+$/)[0]) * 12;
-    const n = l.buy;
-    const sw = P.tinCover + 3;
-    gens.push({
-      name: l.name, qty: `${n} sheets`, L, Wd: sw, H: 0.75 + n * 0.12, lb: l.lb,
-      draw(x, z) {
-        // local x across sheet → world z, local y along sheet → world x, local z → up
-        const q = [-0.5, -0.5, -0.5, 0.5]; // basis (Z, X, Y)
-        for (let i = 0; i < n; i++) {
-          parts.push({ id: id++, kind: 'sheet', geom: { w: sw, h: L, corr: CORR }, pos: [x, i * 0.12, z], quat: q, mat: tinMat, name: l.name, info: `sheet ${i + 1} of ${n}` });
-        }
-      },
-    });
-  }
-  const ridge = bom.lines.find((x) => x.key.startsWith('ridge'));
-  if (ridge) {
-    gens.push({
-      name: ridge.name, qty: `${ridge.buy} pcs`, L: 120, Wd: 14, H: ridge.buy * 0.3 + 2, lb: ridge.lb,
-      draw(x, z) {
-        for (let i = 0; i < ridge.buy; i++) box(x, x + 120, i * 0.3, i * 0.3 + 2, z, z + 14, tinMat, ridge.name, '');
-      },
-    });
-  }
-  const cementLines = bom.lines.filter((x) => x.key === 'cement');
-  const cement = cementLines.length ? { buy: cementLines.reduce((t, l) => t + l.buy, 0), lb: cementLines.reduce((t, l) => t + l.lb, 0) } : null;
-  if (cement) {
-    // pallets of up to 60 bags (10 layers of 6)
-    let left = cement.buy;
-    let pal = 0;
-    const nPal = Math.ceil(cement.buy / 60);
-    while (left > 0) {
-      const n = Math.min(60, left);
-      left -= n;
-      pal++;
-      const per = 6;
-      const layers = Math.ceil(n / per);
+  for (const { bom, P, label } of designs) {
+    const first = gens.length;
+    const lumber = {};
+    for (const l of bom.lines) if (l.key.startsWith('L')) lumber[l.key.slice(1)] = (lumber[l.key.slice(1)] || 0) + l.buy;
+    for (const [size, n] of Object.entries(lumber)) {
+      const { t, w, stock } = LUMBER[size];
+      const cols = Math.max(1, Math.round(Math.sqrt((n * t) / w)));
+      const layers = Math.ceil(n / cols);
+      const lb = bom.lines.filter((l) => l.key === 'L' + size).reduce((s, l) => s + l.lb, 0);
       gens.push({
-        name: `Cement pallet ${pal} of ${nPal}`, qty: `${n} bags`, L: 48, Wd: 48, H: layers * 6 + 5, lb: (cement.lb / cement.buy) * n + 40,
+        name: `${size}x${stock / 12} lumber`, qty: `${n} boards`, L: stock, Wd: cols * w, H: layers * t, lb,
         draw(x, z) {
-          box(x, x + 48, 0, 5, z, z + 48, 'wood', 'Pallet', '');
           for (let i = 0; i < n; i++) {
-            const k = i % per;
-            const r = Math.floor(i / per);
-            const [bx, bz, sx, sz] = r % 2 ? [Math.floor(k / 2) * 16, (k % 2) * 24, 16, 24] : [(k % 2) * 24, Math.floor(k / 2) * 16, 24, 16];
-            box(x + bx + 0.3, x + bx + sx - 0.3, 5 + r * 6, 5 + r * 6 + 5.8, z + bz + 0.3, z + bz + sz - 0.3, 'concrete', 'Cement bag 40 kg', `${i + 1} of ${n}`);
+            const c = i % cols;
+            const r = Math.floor(i / cols);
+            box(x, x + stock, r * t, (r + 1) * t - 0.02, z + c * w, z + (c + 1) * w - 0.05, 'wood', `${size} × ${ftin(stock)}`, `board ${i + 1} of ${n}`);
           }
         },
       });
     }
-  }
-  const mesh = bom.lines.find((x) => x.key === 'mesh');
-  if (mesh) {
-    const d = 30; // a 100' roll of 7' mesh coils to about 30" across
-    gens.push({
-      name: 'Wire mesh rolls', qty: `${mesh.buy} roll${mesh.buy > 1 ? 's' : ''}`, L: 84, Wd: mesh.buy * (d + 2), H: d, lb: mesh.lb,
-      draw(x, z) {
-        for (let i = 0; i < mesh.buy; i++) parts.push({ id: id++, kind: 'cyl', r: d / 2, h: 84, pos: [x + 42, d / 2, z + i * (d + 2) + d / 2], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'steel', name: mesh.name, info: `roll ${i + 1} of ${mesh.buy}` });
-      },
-    });
-  }
-  const plastic = bom.lines.find((x) => x.key === 'plastic');
-  if (plastic) {
-    gens.push({
-      name: 'Plastic sheeting rolls', qty: `${plastic.buy} rolls`, L: 120, Wd: plastic.buy * 7, H: 7, lb: plastic.lb,
-      draw(x, z) {
-        for (let i = 0; i < plastic.buy; i++) parts.push({ id: id++, kind: 'cyl', r: 3.4, h: 120, pos: [x + 60, 3.5, z + i * 7 + 3.5], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'plastic', name: plastic.name, info: '' });
-      },
-    });
-  }
-  const lf = bom.lines.find((x) => x.key.startsWith('louvreFrame'));
-  const lg = bom.lines.find((x) => x.key.startsWith('louvreGlass'));
-  if (lf) {
-    const fh = lf.key.endsWith('4') ? 48 : 36;
-    gens.push({
-      name: 'Louvre frames', qty: `${lf.buy} pairs`, L: fh, Wd: 6, H: lf.buy * 1.4, lb: lf.lb,
-      draw(x, z) {
-        for (let i = 0; i < lf.buy * 2; i++) box(x, x + fh, i * 0.7, i * 0.7 + 0.65, z + 0.2, z + 2.6, 'alu', lf.name, '');
-      },
-    });
-  }
-  if (lg) {
-    const bl = lg.key.endsWith('4') ? 48 : 36;
-    const h = Math.max(6, Math.ceil(lg.buy / 2) * 0.25 + 3);
-    gens.push({
-      name: 'Louvre glass (crated)', qty: `${lg.buy} blades`, L: bl + 4, Wd: 12, H: h, lb: lg.lb + 15,
-      draw(x, z) {
-        box(x, x + bl + 4, 0, h, z, z + 12, 'plyFloor', 'Glass crate — pack blades on edge in cardboard', `${lg.buy} blades`);
-      },
-    });
-  }
-  const block = bom.lines.filter((x) => x.key === 'block');
-  if (block.length) {
-    // pallets of up to 5 layers: 3 blocks along 48" × as many as fit across
-    const t = P.blockT || 6;
-    const perLayer = 3 * Math.floor(48 / t);
-    const per = perLayer * 5;
-    const total = block.reduce((s, l) => s + l.buy, 0);
-    const lbEach = block[0].lb / block[0].buy;
-    const nPal = Math.ceil(total / per);
-    for (let k = 0, left = total; left > 0; k++) {
-      const n = Math.min(per, left);
-      left -= n;
-      const layers = Math.ceil(n / perLayer);
+    for (const l of bom.lines.filter((x) => PLY[x.key])) {
+      const t = PLY[l.key].t;
+      const n = l.buy;
       gens.push({
-        name: `Block pallet ${k + 1} of ${nPal}`, qty: `${n} blocks`, L: 48, Wd: 48, H: layers * 8 + 5, lb: n * lbEach + 40,
+        name: PLY[l.key].name, qty: `${n} sheets`, L: 96, Wd: 48, H: n * t, lb: l.lb,
         draw(x, z) {
-          box(x, x + 48, 0, 5, z, z + 48, 'wood', 'Pallet', '');
+          for (let i = 0; i < n; i++) box(x, x + 96, i * t, (i + 1) * t - 0.01, z, z + 48, 'plyFloor', PLY[l.key].name, `sheet ${i + 1} of ${n}`);
+        },
+      });
+    }
+    const tinMat = P.cladding === 'pvc' ? 'pvc' : 'tin';
+    for (const l of bom.lines.filter((x) => /^(metal|pvc)\d+$/.test(x.key))) {
+      const L = Number(l.key.match(/\d+$/)[0]) * 12;
+      const n = l.buy;
+      const sw = P.tinCover + 3;
+      gens.push({
+        name: l.name, qty: `${n} sheets`, L, Wd: sw, H: 0.75 + n * 0.12, lb: l.lb,
+        draw(x, z) {
+          // local x across sheet → world z, local y along sheet → world x, local z → up
+          const q = [-0.5, -0.5, -0.5, 0.5]; // basis (Z, X, Y)
           for (let i = 0; i < n; i++) {
-            const c = i % perLayer;
-            const r = Math.floor(i / perLayer);
-            const bx = (c % 3) * 16;
-            const bz = Math.floor(c / 3) * t;
-            box(x + bx + 0.2, x + bx + BLOCK.len, 5 + r * 8, 5 + r * 8 + BLOCK.h, z + bz + 0.2, z + bz + t - 0.4, 'block', `${t}" hollow block`, `${i + 1} of ${n}`);
+            parts.push({ id: id++, kind: 'sheet', geom: { w: sw, h: L, corr: CORR }, pos: [x, i * 0.12, z], quat: q, mat: tinMat, name: l.name, info: `sheet ${i + 1} of ${n}` });
           }
         },
       });
     }
-  }
-  const rebar = bom.lines.find((x) => x.key === 'rebar');
-  if (rebar) {
-    gens.push({
-      name: 'Rebar bundle', qty: `${rebar.buy} bars`, L: 240, Wd: 3, H: 2, lb: rebar.lb,
-      draw(x, z) {
-        for (let i = 0; i < rebar.buy; i++) parts.push({ id: id++, kind: 'cyl', r: 0.25, h: 240, pos: [x + 120, 0.25 + Math.floor(i / 4) * 0.5, z + (i % 4) * 0.55 + 0.3], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'rebar', name: rebar.name, info: `bar ${i + 1} of ${rebar.buy}` });
-      },
-    });
-  }
-  for (const l of bom.lines.filter((x) => /^pipe\d$/.test(x.key))) {
-    const od = PIPE_OD[Number(l.key.slice(4))];
-    const n = l.buy;
-    const cols = Math.max(1, Math.round(Math.sqrt(n)));
-    const rows = Math.ceil(n / cols);
-    gens.push({
-      name: l.name.replace(', 10 ft', ''), qty: `${n} lengths`, L: 120, Wd: cols * od, H: rows * od, lb: l.lb,
-      draw(x, z) {
-        for (let i = 0; i < n; i++) parts.push({ id: id++, kind: 'cyl', r: od / 2 - 0.02, h: 120, pos: [x + 60, od / 2 + Math.floor(i / cols) * od, z + (i % cols) * od + od / 2], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'pvcPipe', name: l.name, info: `${i + 1} of ${n}` });
-      },
-    });
-  }
-  const toilet = bom.lines.find((x) => x.key === 'toilet');
-  if (toilet) {
-    gens.push({
-      name: 'Toilet bowl (crated)', qty: '1', L: 26, Wd: 18, H: 20, lb: toilet.lb + 10,
-      draw(x, z) { box(x, x + 26, 0, 20, z, z + 18, 'plyFloor', 'Crate: toilet bowl and seat — pack with cardboard', ''); },
-    });
-  }
-  const drum = bom.lines.find((x) => x.key === 'drum');
-  if (drum) {
-    gens.push({
-      name: '55-gal drum', qty: `${drum.buy} (pack the bucket and fittings inside)`, L: 23, Wd: 23, H: 35, lb: drum.lb,
-      draw(x, z) { parts.push({ id: id++, kind: 'cyl', r: 11.25, h: 34.5, pos: [x + 11.5, 17.25, z + 11.5], quat: null, mat: 'drum', name: drum.name, info: 'bucket, fittings and screen packed inside' }); },
-    });
-  }
-  const gutter = bom.lines.find((x) => x.key === 'gutter');
-  if (gutter) {
-    // 10' lengths of 5" half-round, nested in stacks of up to 6
-    const n = gutter.buy;
-    const stacks = Math.ceil(n / 6);
-    gens.push({
-      name: 'PVC gutters (nested)', qty: `${n} lengths`, L: 120, Wd: stacks * 5.5, H: 3 + Math.min(n, 6) * 0.4, lb: gutter.lb,
-      draw(x, z) {
-        for (let i = 0; i < n; i++) {
-          const st = i % stacks;
-          const lv = Math.floor(i / stacks);
-          box(x, x + 120, lv * 0.4, lv * 0.4 + 2.6, z + st * 5.5, z + st * 5.5 + 5, 'pvcPipe', gutter.name, `length ${i + 1} of ${n}`);
-        }
-      },
-    });
-  }
-  const tank = bom.lines.find((x) => /^tank\d+$/.test(x.key));
-  if (tank) {
-    const t = TANKS[Number(tank.key.slice(4))];
-    gens.push({
-      name: tank.name, qty: '1 (pack the fittings, brackets and screen inside)', L: t.d, Wd: t.d, H: t.h, lb: tank.lb,
-      draw(x, z) { parts.push({ id: id++, kind: 'cyl', r: t.d / 2, h: t.h, pos: [x + t.d / 2, t.h / 2, z + t.d / 2], quat: null, mat: 'tank', name: tank.name, info: 'gutter brackets, fittings and screen packed inside' }); },
-    });
-  }
-  // everything else is small: nails, fasteners, anchors, ties, hinges,
-  // sealant, fittings and screen go in cartons
-  const big = (k) => /^L|^(metal|pvc)\d+$|^ridge|^pipe\d$|^(cement|mesh|plastic|block|rebar|toilet|drum|gutter)$|^tank\d+$|^louvre/.test(k) || PLY[k];
-  const hw = bom.lines.filter((x) => !big(x.key) && !x.local);
-  if (hw.length) {
-    const lb = hw.reduce((s, l) => s + l.lb, 0);
-    const n = Math.max(1, Math.ceil(lb / 45));
-    gens.push({
-      name: 'Hardware cartons', qty: `${n} cartons`, L: n * 17, Wd: 12, H: 10, lb,
-      draw(x, z) {
-        for (let i = 0; i < n; i++) box(x + i * 17, x + i * 17 + 16, 0, 10, z, z + 12, 'plyWall', `Carton: ${[...new Set(hw.map((l) => l.name.replace(/ \(.*/, '').toLowerCase()))].slice(0, 6).join(', ')}…`, '');
-      },
-    });
+    const ridge = bom.lines.find((x) => x.key.startsWith('ridge'));
+    if (ridge) {
+      gens.push({
+        name: ridge.name, qty: `${ridge.buy} pcs`, L: 120, Wd: 14, H: ridge.buy * 0.3 + 2, lb: ridge.lb,
+        draw(x, z) {
+          for (let i = 0; i < ridge.buy; i++) box(x, x + 120, i * 0.3, i * 0.3 + 2, z, z + 14, tinMat, ridge.name, '');
+        },
+      });
+    }
+    const cementLines = bom.lines.filter((x) => x.key === 'cement');
+    const cement = cementLines.length ? { buy: cementLines.reduce((t, l) => t + l.buy, 0), lb: cementLines.reduce((t, l) => t + l.lb, 0) } : null;
+    if (cement) {
+      // pallets of up to 60 bags (10 layers of 6)
+      let left = cement.buy;
+      let pal = 0;
+      const nPal = Math.ceil(cement.buy / 60);
+      while (left > 0) {
+        const n = Math.min(60, left);
+        left -= n;
+        pal++;
+        const per = 6;
+        const layers = Math.ceil(n / per);
+        gens.push({
+          name: `Cement pallet ${pal} of ${nPal}`, qty: `${n} bags`, L: 48, Wd: 48, H: layers * 6 + 5, lb: (cement.lb / cement.buy) * n + 40,
+          draw(x, z) {
+            box(x, x + 48, 0, 5, z, z + 48, 'wood', 'Pallet', '');
+            for (let i = 0; i < n; i++) {
+              const k = i % per;
+              const r = Math.floor(i / per);
+              const [bx, bz, sx, sz] = r % 2 ? [Math.floor(k / 2) * 16, (k % 2) * 24, 16, 24] : [(k % 2) * 24, Math.floor(k / 2) * 16, 24, 16];
+              box(x + bx + 0.3, x + bx + sx - 0.3, 5 + r * 6, 5 + r * 6 + 5.8, z + bz + 0.3, z + bz + sz - 0.3, 'concrete', 'Cement bag 40 kg', `${i + 1} of ${n}`);
+            }
+          },
+        });
+      }
+    }
+    const mesh = bom.lines.find((x) => x.key === 'mesh');
+    if (mesh) {
+      const d = 30; // a 100' roll of 7' mesh coils to about 30" across
+      gens.push({
+        name: 'Wire mesh rolls', qty: `${mesh.buy} roll${mesh.buy > 1 ? 's' : ''}`, L: 84, Wd: mesh.buy * (d + 2), H: d, lb: mesh.lb,
+        draw(x, z) {
+          for (let i = 0; i < mesh.buy; i++) parts.push({ id: id++, kind: 'cyl', r: d / 2, h: 84, pos: [x + 42, d / 2, z + i * (d + 2) + d / 2], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'steel', name: mesh.name, info: `roll ${i + 1} of ${mesh.buy}` });
+        },
+      });
+    }
+    const plastic = bom.lines.find((x) => x.key === 'plastic');
+    if (plastic) {
+      gens.push({
+        name: 'Plastic sheeting rolls', qty: `${plastic.buy} rolls`, L: 120, Wd: plastic.buy * 7, H: 7, lb: plastic.lb,
+        draw(x, z) {
+          for (let i = 0; i < plastic.buy; i++) parts.push({ id: id++, kind: 'cyl', r: 3.4, h: 120, pos: [x + 60, 3.5, z + i * 7 + 3.5], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'plastic', name: plastic.name, info: '' });
+        },
+      });
+    }
+    const lf = bom.lines.find((x) => x.key.startsWith('louvreFrame'));
+    const lg = bom.lines.find((x) => x.key.startsWith('louvreGlass'));
+    if (lf) {
+      const fh = lf.key.endsWith('4') ? 48 : 36;
+      gens.push({
+        name: 'Louvre frames', qty: `${lf.buy} pairs`, L: fh, Wd: 6, H: lf.buy * 1.4, lb: lf.lb,
+        draw(x, z) {
+          for (let i = 0; i < lf.buy * 2; i++) box(x, x + fh, i * 0.7, i * 0.7 + 0.65, z + 0.2, z + 2.6, 'alu', lf.name, '');
+        },
+      });
+    }
+    if (lg) {
+      const bl = lg.key.endsWith('4') ? 48 : 36;
+      const h = Math.max(6, Math.ceil(lg.buy / 2) * 0.25 + 3);
+      gens.push({
+        name: 'Louvre glass (crated)', qty: `${lg.buy} blades`, L: bl + 4, Wd: 12, H: h, lb: lg.lb + 15,
+        draw(x, z) {
+          box(x, x + bl + 4, 0, h, z, z + 12, 'plyFloor', 'Glass crate — pack blades on edge in cardboard', `${lg.buy} blades`);
+        },
+      });
+    }
+    const block = bom.lines.filter((x) => x.key === 'block');
+    if (block.length) {
+      // pallets of up to 5 layers: 3 blocks along 48" × as many as fit across
+      const t = P.blockT || 6;
+      const perLayer = 3 * Math.floor(48 / t);
+      const per = perLayer * 5;
+      const total = block.reduce((s, l) => s + l.buy, 0);
+      const lbEach = block[0].lb / block[0].buy;
+      const nPal = Math.ceil(total / per);
+      for (let k = 0, left = total; left > 0; k++) {
+        const n = Math.min(per, left);
+        left -= n;
+        const layers = Math.ceil(n / perLayer);
+        gens.push({
+          name: `Block pallet ${k + 1} of ${nPal}`, qty: `${n} blocks`, L: 48, Wd: 48, H: layers * 8 + 5, lb: n * lbEach + 40,
+          draw(x, z) {
+            box(x, x + 48, 0, 5, z, z + 48, 'wood', 'Pallet', '');
+            for (let i = 0; i < n; i++) {
+              const c = i % perLayer;
+              const r = Math.floor(i / perLayer);
+              const bx = (c % 3) * 16;
+              const bz = Math.floor(c / 3) * t;
+              box(x + bx + 0.2, x + bx + BLOCK.len, 5 + r * 8, 5 + r * 8 + BLOCK.h, z + bz + 0.2, z + bz + t - 0.4, 'block', `${t}" hollow block`, `${i + 1} of ${n}`);
+            }
+          },
+        });
+      }
+    }
+    const rebar = bom.lines.find((x) => x.key === 'rebar');
+    if (rebar) {
+      gens.push({
+        name: 'Rebar bundle', qty: `${rebar.buy} bars`, L: 240, Wd: 3, H: 2, lb: rebar.lb,
+        draw(x, z) {
+          for (let i = 0; i < rebar.buy; i++) parts.push({ id: id++, kind: 'cyl', r: 0.25, h: 240, pos: [x + 120, 0.25 + Math.floor(i / 4) * 0.5, z + (i % 4) * 0.55 + 0.3], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'rebar', name: rebar.name, info: `bar ${i + 1} of ${rebar.buy}` });
+        },
+      });
+    }
+    for (const l of bom.lines.filter((x) => /^pipe\d$/.test(x.key))) {
+      const od = PIPE_OD[Number(l.key.slice(4))];
+      const n = l.buy;
+      const cols = Math.max(1, Math.round(Math.sqrt(n)));
+      const rows = Math.ceil(n / cols);
+      gens.push({
+        name: l.name.replace(', 10 ft', ''), qty: `${n} lengths`, L: 120, Wd: cols * od, H: rows * od, lb: l.lb,
+        draw(x, z) {
+          for (let i = 0; i < n; i++) parts.push({ id: id++, kind: 'cyl', r: od / 2 - 0.02, h: 120, pos: [x + 60, od / 2 + Math.floor(i / cols) * od, z + (i % cols) * od + od / 2], quat: [0, 0, Math.SQRT1_2, Math.SQRT1_2], mat: 'pvcPipe', name: l.name, info: `${i + 1} of ${n}` });
+        },
+      });
+    }
+    const toilet = bom.lines.find((x) => x.key === 'toilet');
+    if (toilet) {
+      gens.push({
+        name: 'Toilet bowl (crated)', qty: '1', L: 26, Wd: 18, H: 20, lb: toilet.lb + 10,
+        draw(x, z) { box(x, x + 26, 0, 20, z, z + 18, 'plyFloor', 'Crate: toilet bowl and seat — pack with cardboard', ''); },
+      });
+    }
+    const drum = bom.lines.find((x) => x.key === 'drum');
+    if (drum) {
+      gens.push({
+        name: '55-gal drum', qty: `${drum.buy} (pack the bucket and fittings inside)`, L: 23, Wd: 23, H: 35, lb: drum.lb,
+        draw(x, z) { parts.push({ id: id++, kind: 'cyl', r: 11.25, h: 34.5, pos: [x + 11.5, 17.25, z + 11.5], quat: null, mat: 'drum', name: drum.name, info: 'bucket, fittings and screen packed inside' }); },
+      });
+    }
+    const gutter = bom.lines.find((x) => x.key === 'gutter');
+    if (gutter) {
+      // 10' lengths of 5" half-round, nested in stacks of up to 6
+      const n = gutter.buy;
+      const stacks = Math.ceil(n / 6);
+      gens.push({
+        name: 'PVC gutters (nested)', qty: `${n} lengths`, L: 120, Wd: stacks * 5.5, H: 3 + Math.min(n, 6) * 0.4, lb: gutter.lb,
+        draw(x, z) {
+          for (let i = 0; i < n; i++) {
+            const st = i % stacks;
+            const lv = Math.floor(i / stacks);
+            box(x, x + 120, lv * 0.4, lv * 0.4 + 2.6, z + st * 5.5, z + st * 5.5 + 5, 'pvcPipe', gutter.name, `length ${i + 1} of ${n}`);
+          }
+        },
+      });
+    }
+    const tank = bom.lines.find((x) => /^tank\d+$/.test(x.key));
+    if (tank) {
+      const t = TANKS[Number(tank.key.slice(4))];
+      gens.push({
+        name: tank.name, qty: '1 (pack the fittings, brackets and screen inside)', L: t.d, Wd: t.d, H: t.h, lb: tank.lb,
+        draw(x, z) { parts.push({ id: id++, kind: 'cyl', r: t.d / 2, h: t.h, pos: [x + t.d / 2, t.h / 2, z + t.d / 2], quat: null, mat: 'tank', name: tank.name, info: 'gutter brackets, fittings and screen packed inside' }); },
+      });
+    }
+    // everything else is small: nails, fasteners, anchors, ties, hinges,
+    // sealant, fittings and screen go in cartons
+    const big = (k) => /^L|^(metal|pvc)\d+$|^ridge|^pipe\d$|^(cement|mesh|plastic|block|rebar|toilet|drum|gutter)$|^tank\d+$|^louvre/.test(k) || PLY[k];
+    const hw = bom.lines.filter((x) => !big(x.key) && !x.local);
+    if (hw.length) {
+      const lb = hw.reduce((s, l) => s + l.lb, 0);
+      const n = Math.max(1, Math.ceil(lb / 45));
+      gens.push({
+        name: 'Hardware cartons', qty: `${n} cartons`, L: n * 17, Wd: 12, H: 10, lb,
+        draw(x, z) {
+          for (let i = 0; i < n; i++) box(x + i * 17, x + i * 17 + 16, 0, 10, z, z + 12, 'plyWall', `Carton: ${[...new Set(hw.map((l) => l.name.replace(/ \(.*/, '').toLowerCase()))].slice(0, 6).join(', ')}…`, '');
+        },
+      });
+    }
+    if (label) for (const g of gens.slice(first)) g.name = `${label}: ${g.name}`;
   }
 
   // Shelf layout on the "deck"

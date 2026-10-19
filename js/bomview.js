@@ -100,3 +100,27 @@ function downloadCSV(b, P, freight, name) {
 export function bomTotal(b, P, ship) {
   return b.subtotal + b.tax + (ship ? ship.totVol * P.freight : 0);
 }
+
+// Shipping manifest beside a shipping-layout 3D view.
+export function renderShipDoc(host, s, intro = 'Everything on the bill of materials, bundled and strapped as it would go on the ferry.') {
+  const has = (re) => s.bundles.some((b) => re.test(b.name));
+  let h = `<h2 style="margin-top:0">Shipping manifest</h2>
+  <p class="muted">${intro} Hover the 3D view for item details.</p>
+  <div class="cards">
+    <div class="card"><div class="k">Weight</div><div class="v">${num(s.totLb)} lb</div><div class="s">${num(s.totLb * 0.4536)} kg</div></div>
+    <div class="card"><div class="k">Volume</div><div class="v">${num(s.totVol)} ft³</div><div class="s">${num(s.totVol / 35.31, 1)} m³</div></div>
+    <div class="card"><div class="k">Deck space</div><div class="v">${ftin(s.footprint.L)}</div><div class="s">× ${ftin(s.footprint.D)} laid out flat</div></div>
+  </div>
+  <table class="t"><thead><tr><th>Bundle</th><th>Size (L × W × H)</th><th class="n">ft³</th><th class="n">lb</th></tr></thead><tbody>`;
+  for (const b of s.bundles) h += `<tr><td><b>${b.name}</b><div class="use">${b.qty}</div></td><td>${ftin(b.L)} × ${ftin(b.Wd)} × ${ftin(b.H)}</td><td class="n">${num(b.vol, 1)}</td><td class="n">${num(b.lb)}</td></tr>`;
+  h += `<tr class="tot"><td colspan="2">Total</td><td class="n">${num(s.totVol, 1)}</td><td class="n">${num(s.totLb)}</td></tr></tbody></table>
+  <h3>Packing tips</h3><ul>
+  <li>Strap lumber in bundles at 3 points; put the longest boards on the bottom of the stack.</li>
+  <li>Tin/PVC sheets nest tightly — keep them flat on lumber dunnage so they don't kink.${has(/plywood/i) ? ' Put a sheet of plywood on top to protect them.' : ''}</li>
+  ${has(/Cement/) ? '<li>Wrap cement bags in a tarp: cement takes on moisture from the sea air and goes hard. Buy it as close to sailing as possible.</li>' : ''}
+  ${has(/Louvre glass/) ? '<li>Pack louvre glass on edge in a crate with cardboard between blades. The BOM already adds 10% spare blades.</li>' : ''}
+  ${has(/Toilet bowl/) ? '<li>Crate the toilet bowl with cardboard all round: it is the one item that can\'t be replaced on the island if it cracks.</li>' : ''}
+  <li>Keep nails and hardware in sealed buckets — they double as mixing buckets on site.</li>
+  </ul>`;
+  host.innerHTML = h;
+}

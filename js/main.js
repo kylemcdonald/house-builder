@@ -1,11 +1,11 @@
 import { design, DEFAULTS, STEP, WALL_KEYS, parseDoorBays, formatDoorBays } from './design.js';
 import { computeBOM } from './bom.js';
-import { shippingLayout } from './shipping.js';
+import { shippingLayout, combinedShippingLayout } from './shipping.js';
 import { Viewer } from './viewer.js';
 import { DEFAULT_PRICES, PLY, QUOTE, TANKS } from './catalog.js';
 import { ftin, inch, money, num } from './format.js';
 import { buildFields, syncFields } from './fields.js';
-import { renderBomDoc, bomTotal } from './bomview.js';
+import { renderBomDoc, renderShipDoc, bomTotal } from './bomview.js';
 import { TDEFAULTS } from './toilet.js';
 import { createToiletUI } from './toilet-ui.js';
 import { renderPhotos } from './photos.js';
@@ -18,18 +18,20 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 // House parameters are plain keys in the URL hash; toilet-house ones are
 // prefixed "t.", and "tab" remembers which page is open: the house's sub-tab
 // (model, ship, bom, notes), "toilet" / "toilet-<sub>" for the toilet house,
-// or "photos".
+// "all" / "all-bom" for both together, or "photos".
 const P = { ...DEFAULTS };
 const TP = { ...TDEFAULTS };
 let mode = 'house';
 let houseSub = 'model';
 let toiletSub = 'model';
+let allSub = 'ship';
 function readHash() {
   const h = new URLSearchParams(location.hash.slice(1));
   for (const [k, v] of h) {
     if (k === 'tab') {
-      mode = v.startsWith('toilet') ? 'toilet' : v === 'photos' ? 'photos' : 'house';
+      mode = v.startsWith('toilet') ? 'toilet' : v.startsWith('all') ? 'all' : v === 'photos' ? 'photos' : 'house';
       if (mode === 'toilet') toiletSub = v.split('-')[1] || 'model';
+      else if (mode === 'all') allSub = v.split('-')[1] || 'ship';
       else if (mode === 'house') houseSub = v;
     }
     const [obj, defs, key] = k.startsWith('t.') ? [TP, TDEFAULTS, k.slice(2)] : [P, DEFAULTS, k];
@@ -39,7 +41,9 @@ function readHash() {
 }
 function writeHash() {
   const h = new URLSearchParams();
-  const tab = mode === 'toilet' ? (toiletSub === 'model' ? 'toilet' : 'toilet-' + toiletSub) : mode === 'photos' ? 'photos' : houseSub;
+  const tab = mode === 'toilet' ? (toiletSub === 'model' ? 'toilet' : 'toilet-' + toiletSub)
+    : mode === 'all' ? (allSub === 'ship' ? 'all' : 'all-' + allSub)
+    : mode === 'photos' ? 'photos' : houseSub;
   if (tab !== 'model') h.set('tab', tab);
   for (const k of Object.keys(DEFAULTS)) if (P[k] !== DEFAULTS[k]) h.set(k, P[k]);
   for (const k of Object.keys(TDEFAULTS)) if (TP[k] !== TDEFAULTS[k]) h.set('t.' + k, TP[k]);
@@ -47,7 +51,7 @@ function writeHash() {
   history.replaceState(null, '', s ? '#' + s : location.pathname + location.search);
 }
 readHash();
-window.addEventListener('hashchange', () => { readHash(); schedule(); toilet.sync(); toilet.regenerate(); });
+window.addEventListener('hashchange', () => { readHash(); schedule(); toilet.sync(); toilet.regenerate(); showTab(mode); });
 
 const PRICE_KEY = 'polowat-house-prices-v2'; // v2: prices from the written quote
 const prices = structuredClone(DEFAULT_PRICES);
@@ -158,7 +162,7 @@ function syncControls() {
   $('#depthVal').textContent = ftin(P.depth * 12);
   $$('.seg[data-param]').forEach((s) => s.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === P[s.dataset.param])));
   syncFields(ADV, P);
-  $$('#renderSeg button, #renderSeg2 button, #renderSeg3 button').forEach((b) => b.classList.toggle('on', b.dataset.v === renderMode));
+  $$('#renderSeg button, #renderSeg2 button, #renderSeg3 button, #renderSeg4 button, #renderSeg5 button').forEach((b) => b.classList.toggle('on', b.dataset.v === renderMode));
 }
 
 const WALL_LABEL = { front: 'Front', back: 'Back', left: 'Left end', right: 'Right end' };
@@ -198,6 +202,7 @@ function renderDoorGrid() {
 // ------------------------------------------------------------ viewers
 const viewer = new Viewer($('#viewport'));
 let shipViewer = null;
+let allShipViewer = null;
 viewer.setMode(renderMode);
 
 let D = null;
@@ -208,6 +213,9 @@ let pending = false;
 let shipDirty = true;
 let guideDirty = true;
 let lastSize = '';
+let ALL_SHIP = null;
+let allDirty = true;
+let allShipDirty = true;
 
 function schedule() {
   syncControls();
@@ -247,8 +255,8 @@ function regenerate() {
 function updateHeader() {
   if (!D) return;
   const t = mode === 'toilet';
-  if (mode === 'photos') {
-    $('#subtitle').textContent = 'Every item on the house and toilet-house bills of materials';
+  if (mode === 'photos' || mode === 'all') {
+    $('#subtitle').textContent = mode === 'all' ? 'The house and the toilet house together' : 'Every item on the house and toilet-house bills of materials';
     $('#totalChip').textContent = money(bomTotal(BOM, P, SHIP) + toilet.total());
     return;
   }
@@ -264,7 +272,7 @@ function updateShip() {
   if (shipDirty) {
     shipViewer.setModel({ parts: SHIP.parts, bounds: SHIP.bounds, labels: SHIP.labels }, { fit: true, dir: [0.25, 1.3, 0.9] });
     shipViewer.setStep(Infinity, Infinity);
-    renderShipTable();
+    renderShipDoc($('#shipTable'), SHIP);
     shipDirty = false;
   }
 }
@@ -351,13 +359,14 @@ $$('.seg[data-param]').forEach((s) => s.addEventListener('click', (e) => {
   P[s.dataset.param] = b.dataset.v;
   schedule();
 }));
-$$('#renderSeg, #renderSeg2, #renderSeg3').forEach((s) => s.addEventListener('click', (e) => {
+$$('#renderSeg, #renderSeg2, #renderSeg3, #renderSeg4, #renderSeg5').forEach((s) => s.addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
   renderMode = b.dataset.v;
   try { localStorage.setItem('polowat-render', renderMode); } catch { /* ignore */ }
   viewer.setMode(renderMode);
   if (shipViewer) shipViewer.setMode(renderMode);
+  if (allShipViewer) allShipViewer.setMode(renderMode);
   toilet.setMode(renderMode);
   syncControls();
 }));
@@ -381,32 +390,39 @@ $$('.share-btn').forEach((btn) => btn.addEventListener('click', async () => {
 }));
 
 // ------------------------------------------------------------ tabs
-// Top tabs pick the design; each design has its own row of sub-tabs.
+// Top tabs pick the design (or both, under "All"); each has its own row of
+// sub-tabs.
 const houseOn = (sub) => mode === 'house' && houseSub === sub;
 function showTab(m) {
-  mode = m === 'toilet' || m === 'photos' ? m : 'house';
+  mode = ['all', 'toilet', 'photos'].includes(m) ? m : 'house';
   if (!$(`#houseTabs button[data-sub="${houseSub}"]`)) houseSub = 'model';
+  if (!$(`#allTabs button[data-sub="${allSub}"]`)) allSub = 'ship';
   $$('.tab').forEach((x) => x.classList.toggle('active', x.dataset.mode === mode));
   $('.tab.active').scrollIntoView({ block: 'nearest', inline: 'nearest' });
   $$('.pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + mode));
   $$('#houseTabs button').forEach((x) => x.classList.toggle('on', x.dataset.sub === houseSub));
   $$('#pane-house .tpane').forEach((p) => p.classList.toggle('active', p.id === 'hpane-' + houseSub));
+  $$('#allTabs button').forEach((x) => x.classList.toggle('on', x.dataset.sub === allSub));
+  $$('#pane-all .tpane').forEach((p) => p.classList.toggle('active', p.id === 'apane-' + allSub));
   const t = mode === 'toilet';
   $('#sideHouse').hidden = t;
   $('#sideToilet').hidden = !t;
-  $('.app').classList.toggle('no-side', mode === 'photos');
+  $('.app').classList.toggle('no-side', mode === 'photos' || mode === 'all');
   renderPhotosPage();
   viewer.active = houseOn('model');
   if (shipViewer) shipViewer.active = houseOn('ship');
+  if (allShipViewer) allShipViewer.active = mode === 'all' && allSub === 'ship';
   toilet.setActive(t);
   if (houseOn('ship')) requestAnimationFrame(() => { updateShip(); shipViewer.active = true; shipViewer.resize(); });
   if (houseOn('model')) requestAnimationFrame(() => viewer.resize());
   if (houseOn('guide')) requestAnimationFrame(updateGuide);
+  if (mode === 'all') requestAnimationFrame(updateAll);
   writeHash();
   updateHeader();
 }
 $$('.tab').forEach((t) => t.addEventListener('click', () => showTab(t.dataset.mode)));
 $$('#houseTabs button').forEach((b) => b.addEventListener('click', () => { houseSub = b.dataset.sub; showTab('house'); }));
+$$('#allTabs button').forEach((b) => b.addEventListener('click', () => { allSub = b.dataset.sub; showTab('all'); }));
 
 // ------------------------------------------------------------ prices (shared by both designs)
 function pricesChanged() {
@@ -430,7 +446,7 @@ const toilet = createToiletUI({
   getMode: () => renderMode,
   onSub: (s) => { toiletSub = s; writeHash(); },
   houseMeshSpare: () => BOM?.meshSpareFt ?? 0,
-  onChange: () => { writeHash(); updateHeader(); },
+  onChange: () => { writeHash(); allDirty = true; updateAll(); updateHeader(); },
   onPrices: pricesChanged,
   onResetPrices: resetPrices,
 });
@@ -443,33 +459,67 @@ function renderBOM() {
   });
 }
 
+// ------------------------------------------------------------ both designs together
+// The two bills of materials one after the other, each section named after
+// its design, and both designs' bundles on one deck, so every total is the
+// house's plus the toilet house's.
+function combinedBOM(designs) {
+  const out = { sections: [], lines: [], cuts: [], local: [], subtotal: 0, tax: 0 };
+  const local = new Map();
+  for (const { bom, label } of designs) {
+    const sec = (s) => `${label}: ${s}`;
+    out.sections.push(...bom.sections.map(sec));
+    out.lines.push(...bom.lines.map((l) => ({ ...l, section: sec(l.section) })));
+    out.cuts.push(...bom.cuts.map((c) => ({ ...c, section: sec(c.section) })));
+    for (const l of bom.local) {
+      const e = local.get(l.name + l.unit) || { ...l, qty: 0 };
+      e.qty += l.qty;
+      local.set(l.name + l.unit, e);
+    }
+    out.subtotal += bom.subtotal;
+    out.tax += bom.tax;
+  }
+  out.local = [...local.values()];
+  return out;
+}
+function updateAll() {
+  if (mode !== 'all' || !BOM || !toilet.BOM) return;
+  if (allDirty) {
+    const designs = [{ bom: BOM, P, label: 'House' }, { bom: toilet.BOM, P: TP, label: 'Toilet house' }];
+    const b = combinedBOM(designs);
+    ALL_SHIP = combinedShippingLayout(designs);
+    // tax and freight are added per design; show the blended rates when they differ
+    const freight = SHIP.totVol * P.freight + toilet.SHIP.totVol * TP.freight;
+    const AP = {
+      tax: P.tax === TP.tax ? P.tax : Math.round((b.tax / b.subtotal) * 1000) / 10,
+      freight: P.freight === TP.freight ? P.freight : freight / ALL_SHIP.totVol,
+    };
+    renderShipDoc($('#aShipTable'), ALL_SHIP, 'Everything on both bills of materials, bundled and strapped as it would go on the ferry. Each bundle is marked with the building it is for.');
+    renderBomDoc($('#aBomDoc'), {
+      bom: b, P: AP, ship: ALL_SHIP, prices, area: D.info.floorArea + toilet.D.info.innerArea, areaLabel: 'in both',
+      csvName: `house-${P.width}x${P.depth}-and-toilet-house-bom.csv`, onPrices: pricesChanged, onResetPrices: resetPrices,
+    });
+    allDirty = false;
+    allShipDirty = true;
+  }
+  if (allSub !== 'ship') return;
+  if (!allShipViewer) {
+    allShipViewer = new Viewer($('#aShipViewport'));
+    allShipViewer.setMode(renderMode);
+  }
+  if (allShipDirty) {
+    allShipViewer.setModel({ parts: ALL_SHIP.parts, bounds: ALL_SHIP.bounds, labels: ALL_SHIP.labels }, { fit: true, dir: [0.25, 1.3, 0.9] });
+    allShipViewer.setStep(Infinity, Infinity);
+    allShipDirty = false;
+  }
+  allShipViewer.active = true;
+  allShipViewer.resize();
+}
+
 // ------------------------------------------------------------ photos
 function renderPhotosPage() {
   if (mode !== 'photos' || !toilet.BOM) return;
   renderPhotos($('#photosDoc'), { boms: { house: BOM, toilet: toilet.BOM }, prices });
-}
-
-// ------------------------------------------------------------ shipping table
-function renderShipTable() {
-  const s = SHIP;
-  let h = `<h2 style="margin-top:0">Shipping manifest</h2>
-  <p class="muted">Everything on the bill of materials, bundled and strapped as it would go on the ferry. Hover the 3D view for item details.</p>
-  <div class="cards">
-    <div class="card"><div class="k">Weight</div><div class="v">${num(s.totLb)} lb</div><div class="s">${num(s.totLb * 0.4536)} kg</div></div>
-    <div class="card"><div class="k">Volume</div><div class="v">${num(s.totVol)} ft³</div><div class="s">${num(s.totVol / 35.31, 1)} m³</div></div>
-    <div class="card"><div class="k">Deck space</div><div class="v">${ftin(s.footprint.L)}</div><div class="s">× ${ftin(s.footprint.D)} laid out flat</div></div>
-  </div>
-  <table class="t"><thead><tr><th>Bundle</th><th>Size (L × W × H)</th><th class="n">ft³</th><th class="n">lb</th></tr></thead><tbody>`;
-  for (const b of s.bundles) h += `<tr><td><b>${b.name}</b><div class="use">${b.qty}</div></td><td>${ftin(b.L)} × ${ftin(b.Wd)} × ${ftin(b.H)}</td><td class="n">${num(b.vol, 1)}</td><td class="n">${num(b.lb)}</td></tr>`;
-  h += `<tr class="tot"><td colspan="2">Total</td><td class="n">${num(s.totVol, 1)}</td><td class="n">${num(s.totLb)}</td></tr></tbody></table>
-  <h3>Packing tips</h3><ul>
-  <li>Strap lumber in bundles at 3 points; put the longest boards on the bottom of the stack.</li>
-  <li>Tin/PVC sheets nest tightly — keep them flat on lumber dunnage so they don't kink. Put a sheet of plywood on top to protect them.</li>
-  <li>Wrap cement bags in a tarp: cement takes on moisture from the sea air and goes hard. Buy it as close to sailing as possible.</li>
-  <li>Pack louvre glass on edge in a crate with cardboard between blades. The BOM already adds 10% spare blades.</li>
-  <li>Keep nails and hardware in sealed buckets — they double as mixing buckets on site.</li>
-  </ul>`;
-  $('#shipTable').innerHTML = h;
 }
 
 // ------------------------------------------------------------ notes

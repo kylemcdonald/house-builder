@@ -62,17 +62,26 @@ The waste goes either to a **seawater outfall** or to a **pit**:
 - **Outfall:** a buried drain down the beach, then a pipe along the lagoon floor held down by concrete collars, with a flap valve and a cleanout.
 - **Pit:** block-lined, with a concrete lid. The model shows groundwater standing in it when it is dug below the water table.
 
-The two designs are the top tabs (House and Toilet House), and each has its own row of pages underneath. The toilet house has its own 3D model with 13 construction steps and a "Site" view of the whole outfall. It also has:
+The two designs are top tabs (House and Toilet House), and each has its own row of pages underneath. The toilet house has its own 3D model with 13 construction steps and a "Site" view of the whole outfall. It also has:
 - a **Step-by-step** guide, from laying out the slab to the first flush. Its drawings include the drain under the slab, a slab plan with the flange and dowel positions, both block courses, every wall's framing with stud lengths, the rafter with its two birdsmouths, and the outfall or the pit
 - a **Waste system** page: how the outfall works, its numbers (flush water, how far each flush moves the water in the flooded pipe, how long waste stays in it), what makes it work, and a comparison of outfall, pit and the shoreline
+- a **Shipping layout** of its bundles, like the house's
 - a bill of materials with shipping bundles
 - design notes
 
-Toilet-house parameters are kept in the URL with a `t.` prefix, and `tab=` records the open page (for example `tab=ship` or `tab=toilet-waste`).
+Toilet-house parameters are kept in the URL with a `t.` prefix, and `tab=` records the open page (for example `tab=ship`, `tab=toilet-waste` or `tab=all-bom`).
+
+## All
+
+The first top tab, **All**, puts both designs together. It has two pages:
+- a **Shipping layout** with the bundles of both designs on one deck, each one marked with the building it is for
+- a **Bill of materials** with the house's sections followed by the toilet house's
+
+Every total on it (cost, tax, freight, weight and volume) is the house's plus the toilet house's. The shopping list adds up items that both designs use.
 
 ## Photos
 
-A third top tab, **Photos**, shows a picture of every item on both bills of materials, grouped by kind, with the quantity and cost each design needs. It helps when asking for things at the shop counter. A checkbox also shows catalog items that the current designs don't use (the other plywood, louvre and pipe sizes, for example). The pictures are in `img/items/`, and `js/photo-data.js` records where each one came from. Click a photo to open its source.
+The last top tab, **Photos**, shows a picture of every item on both bills of materials, grouped by kind, with the quantity and cost each design needs. It helps when asking for things at the shop counter. A checkbox also shows catalog items that the current designs don't use (the other plywood, louvre and pipe sizes, for example). The pictures are in `img/items/`, and `js/photo-data.js` records where each one came from. Click a photo to open its source.
 
 ## Structure
 

@@ -3,6 +3,7 @@
 // are the model itself at each stage.
 import { STEP, subtract, LAP } from './design.js';
 import { PLY } from './catalog.js';
+import { houseTools } from './tools.js';
 import { ftin, inch, num } from './format.js';
 import { renderGuide, tip, warn, check, need, figs, ol, ul } from './guide.js';
 import {
@@ -539,27 +540,7 @@ export function renderHouseGuide(host, { d, P, bom }) {
 
   // ---------------------------------------------------------- text
   const wallBayCount = Object.values(g.walls).reduce((s, w) => s + w.bays.length, 0);
-  const tools = [
-    ['Tape measures', 'two 25\' tapes, and a 100\' tape for the diagonals'],
-    ['Chalk line and pencils', 'carpenter\'s pencils and a marker'],
-    ['Speed square', 'for square cuts and the roof angle'],
-    ['Levels', 'a 4\' level and a short one'],
-    ['String line and line level', 'for long straight lines'],
-    ['Circular saw', '7-1/4", with spare blades'],
-    ['Handsaw', 'to finish cuts the circular saw can\'t reach'],
-    [clad === 'PVC' ? 'Fine-tooth saw blade' : 'Tin snips', clad === 'PVC' ? 'for cutting the PVC sheets' : 'left- and right-cut aviation snips for the metal sheets'],
-    ['Two framing hammers', '20 oz, and a pry bar'],
-    ['Hammer drill', 'with 3/16" and 1/2" masonry bits (buy spares)'],
-    ['Drill/driver', 'with a 5/16" hex nut driver for the roofing screws'],
-    ['Wrench or socket', '3/4" for the 1/2" wedge anchors'],
-    ['Caulk gun', 'for the sealant'],
-    ['Ladders and sawhorses', 'two stepladders, one long ladder, two sawhorses, some planks'],
-    ['Power', 'a small generator and extension cords, or cordless tools with spare batteries'],
-    ...(sc ? [['Staple gun', 'with 3/8" stainless staples, for the insect screen']] : []),
-    ...(rn ? [['Hacksaw or PVC saw', 'for the pipes and gutters, and a file to clean the cut ends']] : []),
-    ...(slab || rn ? [['Concrete tools', 'shovels, a mixing tub or wheelbarrow, a hoe, six 5-gal buckets, a hand tamper, a straight 8\' 2x4, a wood float'], ['Water', 'a drum of fresh water for mixing and curing']] : []),
-    ['Safety gear', 'safety glasses, ear protection, work gloves, dust masks, rubber gloves for concrete, a first-aid kit'],
-  ];
+  const tools = houseTools({ pvc: clad === 'PVC', screens: !!sc, rain: !!rn, concrete: !!(slab || rn) }).map((t) => [t.name, t.desc]);
   const gloss = [
     ['Pony wall', `the low concrete wall (${ftin(g.PH)} high) around the edge of the floor`],
     ['Column', `one of the ${i.columns} concrete posts (${inch(g.C)} square)`],

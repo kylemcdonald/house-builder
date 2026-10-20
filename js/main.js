@@ -1,5 +1,5 @@
 import { design, DEFAULTS, STEP, WALL_KEYS, parseDoorBays, formatDoorBays } from './design.js';
-import { computeBOM } from './bom.js';
+import { computeBOM, phaseBOM } from './bom.js';
 import { shippingLayout, combinedShippingLayout } from './shipping.js';
 import { Viewer } from './viewer.js';
 import { DEFAULT_PRICES, PLY, QUOTE, TANKS } from './catalog.js';
@@ -227,10 +227,19 @@ function schedule() {
   });
 }
 
+// The house's BOM in two passes: phase 1 is the design without the gutters
+// and tank (D0), phase 2 is what they add.
+let D0 = null;
+function houseBOM() {
+  const full = computeBOM(D, P, prices);
+  return D0 ? phaseBOM(full, computeBOM(D0, P, prices), P) : full;
+}
+
 function regenerate() {
   writeHash();
   D = design(P);
-  BOM = computeBOM(D, P, prices);
+  D0 = P.rainwater === 'yes' ? design({ ...P, rainwater: 'no' }) : null;
+  BOM = houseBOM();
   SHIP = shippingLayout(BOM, P);
   const sizeKey = `${P.width}x${P.depth}`;
   viewer.setModel({ parts: D.parts, bounds: D.bounds, dims: D.dims }, { fit: sizeKey !== lastSize && Math.abs(parseFloat(lastSize) - P.width) > 6 });
@@ -427,7 +436,7 @@ $$('#allTabs button').forEach((b) => b.addEventListener('click', () => { allSub 
 // ------------------------------------------------------------ prices (shared by both designs)
 function pricesChanged() {
   savePrices();
-  BOM = computeBOM(D, P, prices);
+  BOM = houseBOM();
   renderBOM();
   toilet.refreshBOM();
   renderPhotosPage();
@@ -456,6 +465,7 @@ function renderBOM() {
   renderBomDoc($('#bomDoc'), {
     bom: BOM, P, ship: SHIP, prices, area: D.info.floorArea,
     csvName: `house-${P.width}x${P.depth}-bom.csv`, onPrices: pricesChanged, onResetPrices: resetPrices,
+    shopName: `house-${P.width}x${P.depth}-${BOM.phased ? 'phase1-' : ''}shopping-list`, shopTitle: `${P.width}' × ${P.depth}' house`,
   });
 }
 

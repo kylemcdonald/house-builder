@@ -44,7 +44,10 @@ Every dimension of the existing concrete can be set to match what was actually p
   - plywood is nested on 4×8 sheets
   - 8′, 10′ and 12′ corrugated sheets are chosen at the lowest cost
   - each material group has its own contingency/overage
+  - the tools from the guide's tool list are on it too
+  - with gutters and tank on, it is split into two phases: **phase 1** is the house, **phase 2** the gutters, downpipes, water tank and its base, which can be bought and built later
   - prices are editable, and you can export a CSV
+- **Store shopping list** for the counter at Ace Hardware in Weno: every item with the shop's item # from its quote, the Ace Hardware item # and manufacturer's #, the quantity in Ace's packs, a price, a plain-English description and what it is used for. It downloads as a CSV or prints as a clean page whose item names link to the Ace pages. The lists for the default design are in `shopping/`.
 - **Design notes**: key specs, the reasons behind the design choices, and the assumptions you should check.
 - The URL stores every parameter, so a design can be shared as a link.
 
@@ -95,11 +98,22 @@ The app is static HTML/JS with no build step. three.js loads from a CDN through 
 python3 -m http.server 8000
 ```
 
+The printed shopping lists in `shopping/` are made from the default design with Node:
+
+```sh
+npm install
+npm run shopping
+```
+
+This writes a CSV and a printable HTML page for each phase. The PDFs beside them are those pages printed to PDF from Chromium, with the links kept. The Ace Hardware item numbers, prices and pack sizes are in `js/ace-data.js`.
+
 | File | Purpose |
 | --- | --- |
 | `js/design.js` | Parametric engine: parameters → parts, steps and quantities |
 | `js/catalog.js` | Shop prices, lumber and plywood sizes, weights |
-| `js/bom.js` | Cut optimisation, sheet packing, pricing |
+| `js/bom.js` | Cut optimisation, sheet packing, pricing, the two building phases |
+| `js/tools.js` | The house's tool list, shared by the guide and the BOM |
+| `js/shopping.js`, `js/ace-data.js`, `scripts/shopping-list.mjs` | Store shopping list: Ace Hardware item numbers, CSV and printable page |
 | `js/shipping.js` | Flat-pack bundle layout |
 | `js/viewer.js`, `js/materials.js`, `js/geometry.js` | Rendering |
 | `js/toilet.js` | Toilet house: parameters → parts, steps and quantities |

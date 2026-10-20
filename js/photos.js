@@ -2,6 +2,7 @@
 // house's bills of materials, with the quantity each design needs.
 import { PHOTOS } from './photo-data.js';
 import { money, num } from './format.js';
+import { TOOL_LB } from './tools.js';
 
 const GROUPS = [
   ['Lumber', /^L\d/],
@@ -11,6 +12,7 @@ const GROUPS = [
   ['Gutters & water tank', /^(gutter\w*|elbow3|tee3|ffCap|pipeStrap3|tank\d+|tankTap|screwSS)$/],
   ['Concrete & masonry', /^(cement|block|mesh|meshOffcut|tieWire|plastic|rebar)$/],
   ['Toilet & plumbing', /^(toilet|pipe\d|closetFlange|pvcBend|pvcTee|cleanout|pvcCoupling|checkValve|pvcCement|ventBoot|ventCap|pipeStrap|drum|bucket)$/],
+  ['Tools', new RegExp(`^(${Object.keys(TOOL_LB).join('|')})$`)],
   ['Fasteners & hardware', /./],
 ];
 

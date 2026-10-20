@@ -233,7 +233,8 @@ export function combinedShippingLayout(designs) {
     // everything else is small: nails, fasteners, anchors, ties, hinges,
     // sealant, fittings and screen go in cartons
     const big = (k) => /^L|^(metal|pvc)\d+$|^ridge|^pipe\d$|^(cement|mesh|plastic|block|rebar|toilet|drum|gutter)$|^tank\d+$|^louvre/.test(k) || PLY[k];
-    const hw = bom.lines.filter((x) => !big(x.key) && !x.local);
+    const tool = (l) => l.section === 'Tools' || l.tool;
+    const hw = bom.lines.filter((x) => !big(x.key) && !x.local && !tool(x));
     if (hw.length) {
       const lb = hw.reduce((s, l) => s + l.lb, 0);
       const n = Math.max(1, Math.ceil(lb / 45));
@@ -242,6 +243,16 @@ export function combinedShippingLayout(designs) {
         draw(x, z) {
           for (let i = 0; i < n; i++) box(x + i * 17, x + i * 17 + 16, 0, 10, z, z + 12, 'plyWall', `Carton: ${[...new Set(hw.map((l) => l.name.replace(/ \(.*/, '').toLowerCase()))].slice(0, 6).join(', ')}…`, '');
         },
+      });
+    }
+    // tools: the long ladder sets the length; the rest packs around it
+    const tools = bom.lines.filter((x) => !big(x.key) && tool(x));
+    if (tools.length) {
+      const n = tools.reduce((t, l) => t + l.buy, 0);
+      const lb = tools.reduce((t, l) => t + l.lb, 0);
+      gens.push({
+        name: 'Tools and equipment', qty: `${n} items`, L: 132, Wd: 30, H: 36, lb,
+        draw(x, z) { box(x, x + 132, 0, 36, z, z + 30, 'plyWall', `Tools: ${[...new Set(tools.map((l) => l.name.toLowerCase()))].slice(0, 6).join(', ')}…`, ''); },
       });
     }
     if (label) for (const g of gens.slice(first)) g.name = `${label}: ${g.name}`;

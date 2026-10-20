@@ -1,7 +1,8 @@
 // Bill-of-materials page, shared by the house and the toilet house.
-import { shoppingList } from './bom.js';
+import { shoppingList, PHASES } from './bom.js';
 import { QUOTE } from './catalog.js';
 import { ftin, money, num } from './format.js';
+import { shopRows, shopCSV, shopHTML } from './shopping.js';
 
 // opts: { bom, P, ship, prices, area, areaLabel, csvName, onPrices, onResetPrices, extraCards }
 export function renderBomDoc(host, o) {
@@ -19,11 +20,22 @@ export function renderBomDoc(host, o) {
   <div class="actions">
     <button class="btn" data-act="csv">Download CSV</button>
     <button class="btn" data-act="print">Print</button>
+    ${o.shopName ? `<button class="btn" data-act="shopcsv">Store shopping list CSV${b.phased ? ' (phase 1)' : ''}</button>
+    <button class="btn" data-act="shopprint">Print store shopping list${b.phased ? ' (phase 1)' : ''}</button>` : ''}
     <button class="btn" data-act="reset">Reset prices</button>
   </div>
   <div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th>Used for</th><th class="n">Net</th><th class="n">+ Over</th><th class="n">Buy</th><th class="n">Unit price</th><th class="n">Total</th></tr></thead><tbody>`;
-  for (const sec of b.sections) {
-    const ls = b.lines.filter((l) => l.section === sec);
+  // a phased BOM (the house) lists phase 1's sections, then phase 2's
+  const phases = b.phased ? [1, 2] : [0];
+  const inPhase = (l, ph) => !ph || (l.phase || 1) === ph;
+  const groups = phases.flatMap((ph) => [{ ph }, ...b.sections.map((sec) => ({ ph, sec }))]);
+  for (const { ph, sec } of groups) {
+    const ls = b.lines.filter((l) => inPhase(l, ph) && (!sec || l.section === sec));
+    if (!sec) {
+      if (ph) h += `<tr class="tot"><td colspan="6">${PHASES[ph]}</td><td class="n">${money(ls.reduce((s, l) => s + l.total, 0))}</td></tr>`;
+      continue;
+    }
+    if (!ls.length) continue;
     const st = ls.reduce((s, l) => s + l.total, 0);
     h += `<tr class="sec"><td colspan="6">${sec}</td><td class="n">${money(st)}</td></tr>`;
     for (const l of ls) {
@@ -41,10 +53,12 @@ export function renderBomDoc(host, o) {
   if (freight) h += `<tr><td colspan="6">Ferry freight: ${num(ship.totVol)} ft³ × ${money(P.freight)}</td><td class="n">${money(freight)}</td></tr>`;
   h += `<tr class="tot"><td colspan="6">Total</td><td class="n">${money(total)}</td></tr></tbody></table></div>`;
 
-  const shop = shoppingList(b).filter((s) => s.total > 0);
-  h += `<h3>Shopping list (what to ask for at the counter)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Total</th></tr></thead><tbody>`;
-  for (const s of shop) h += `<tr><td>${s.name}${s.est ? '<span class="badge">est.</span>' : ''}${s.quote ? '<span class="badge quote">quote</span>' : ''}</td><td class="n">${num(s.buy)} ${s.unit !== 'ea' ? s.unit : ''}</td><td class="n">${money(s.price)}</td><td class="n">${money(s.total)}</td></tr>`;
-  h += `</tbody></table></div>`;
+  for (const ph of phases) {
+    const shop = shoppingList({ lines: b.lines.filter((l) => inPhase(l, ph)) }).filter((s) => s.total > 0);
+    h += `<h3>Shopping list${ph ? ` — ${PHASES[ph].toLowerCase()}` : ''} (what to ask for at the counter)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Total</th></tr></thead><tbody>`;
+    for (const s of shop) h += `<tr><td>${s.name}${s.est ? '<span class="badge">est.</span>' : ''}${s.quote ? '<span class="badge quote">quote</span>' : ''}</td><td class="n">${num(s.buy)} ${s.unit !== 'ea' ? s.unit : ''}</td><td class="n">${money(s.price)}</td><td class="n">${money(s.total)}</td></tr>`;
+    h += `<tr class="tot"><td colspan="3">Total before tax</td><td class="n">${money(shop.reduce((t, s) => t + s.total, 0))}</td></tr></tbody></table></div>`;
+  }
 
   h += `<h3>Local materials (gathered on Polowat, not purchased)</h3><div class="table-wrap"><table class="t"><thead><tr><th>Material</th><th class="n">Qty</th></tr></thead><tbody>`;
   for (const l of b.local.filter((x) => x.qty > 0)) h += `<tr><td>${l.name}</td><td class="n">${num(l.qty)} ${l.unit}</td></tr>`;
@@ -79,22 +93,37 @@ export function renderBomDoc(host, o) {
   host.querySelector('[data-act=csv]').addEventListener('click', () => downloadCSV(b, P, freight, o.csvName));
   host.querySelector('[data-act=print]').addEventListener('click', () => window.print());
   host.querySelector('[data-act=reset]').addEventListener('click', o.onResetPrices);
+  if (o.shopName) {
+    const rows = () => shopRows(b, b.phased ? 1 : 0);
+    const label = b.phased ? `${o.shopTitle}, ${PHASES[1].toLowerCase()}` : o.shopTitle;
+    host.querySelector('[data-act=shopcsv]').addEventListener('click', () => download(shopCSV(rows()), `${o.shopName}.csv`, 'text/csv'));
+    host.querySelector('[data-act=shopprint]').addEventListener('click', () => {
+      const w = window.open('', '_blank');
+      if (!w) return;
+      w.document.write(shopHTML(rows(), { title: `Shopping list: ${label}`, subtitle: 'For Ace Hardware, Weno, Chuuk', date: new Date().toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }) }));
+      w.document.close();
+      w.addEventListener('load', () => w.print());
+    });
+  }
   return total;
 }
 
-function downloadCSV(b, P, freight, name) {
-  const rows = [['Section', 'Item', 'Used for', 'Net', 'Overage %', 'Buy', 'Unit', 'Unit price', 'Total', 'Estimated price']];
-  for (const l of b.lines) rows.push([l.section, l.name, l.use, l.net.toFixed(2), l.ov, l.buy, l.unit, l.price.toFixed(2), l.total.toFixed(2), l.est ? 'yes' : '']);
-  rows.push(['', 'Subtotal', '', '', '', '', '', '', b.subtotal.toFixed(2), '']);
-  if (b.tax) rows.push(['', `Sales tax ${P.tax}%`, '', '', '', '', '', '', b.tax.toFixed(2), '']);
-  rows.push(['', 'Total', '', '', '', '', '', '', (b.subtotal + b.tax + freight).toFixed(2), '']);
-  if (freight) rows.push(['', 'Freight', '', '', '', '', '', '', freight.toFixed(2), '']);
-  const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+function download(text, name, type) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.href = URL.createObjectURL(new Blob([text], { type }));
   a.download = name;
   a.click();
   URL.revokeObjectURL(a.href);
+}
+
+function downloadCSV(b, P, freight, name) {
+  const rows = [['Phase', 'Section', 'Item', 'Used for', 'Net', 'Overage %', 'Buy', 'Unit', 'Unit price', 'Total', 'Estimated price']];
+  for (const l of b.lines) rows.push([b.phased ? PHASES[l.phase] : '', l.section, l.name, l.use, l.net.toFixed(2), l.ov, l.buy, l.unit, l.price.toFixed(2), l.total.toFixed(2), l.est ? 'yes' : '']);
+  rows.push(['', '', 'Subtotal', '', '', '', '', '', '', b.subtotal.toFixed(2), '']);
+  if (b.tax) rows.push(['', '', `Sales tax ${P.tax}%`, '', '', '', '', '', '', b.tax.toFixed(2), '']);
+  rows.push(['', '', 'Total', '', '', '', '', '', '', (b.subtotal + b.tax + freight).toFixed(2), '']);
+  if (freight) rows.push(['', '', 'Freight', '', '', '', '', '', '', freight.toFixed(2), '']);
+  download(rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'), name, 'text/csv');
 }
 
 export function bomTotal(b, P, ship) {

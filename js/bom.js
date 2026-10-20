@@ -2,6 +2,7 @@
 // overage contingency per material group, pricing and weights.
 import { LUMBER, PLY, LUMBER_DENSITY, TIN_LB, CEMENT_LB, MESH, BLOCK, BAG_YIELD_FT3, MORTAR_FT3_PER_BAG } from './catalog.js';
 import { ftin, inch } from './format.js';
+import { houseTools, TOOL_LB } from './tools.js';
 
 const KERF = 0.125;
 
@@ -118,7 +119,7 @@ function lineAdder(lines, prices) {
     const price = opts.price ?? prices[key]?.price ?? 0;
     lines.push({
       section, key, name: opts.name || prices[key]?.name || key, use, net, ov: ovPct, buy, unit, price,
-      total: buy * price, est: !!prices[key]?.est, quote: !!prices[key]?.quote, note: prices[key]?.note, lb: (opts.lb || 0) * buy, local: !!opts.local,
+      total: buy * price, est: !!prices[key]?.est, quote: !!prices[key]?.quote, store: prices[key]?.store, note: prices[key]?.note, lb: (opts.lb || 0) * buy, local: !!opts.local,
       fixed: !prices[key],
     });
   };
@@ -281,7 +282,13 @@ export function computeBOM(d, P, prices) {
   add('Fasteners & hardware', 'conScrew', `Infill framing${q.rain ? ' and rain-pipe standoffs' : ''} to concrete (~${q.screws})`, q.screws / 100, ovF, { lb: 3, unit: 'boxes' });
   add('Fasteners & hardware', 'tie', 'Rafters to wall plate', q.ties, ovF, { lb: 0.25 });
   add('Fasteners & hardware', 'hinge', `${q.doors} doors × 3`, q.doors * 3, 0, { lb: 0.8 });
-  add('Fasteners & hardware', 'hasp', `${q.doors} doors`, q.doors, 0, { lb: 1 });
+  add('Fasteners & hardware', 'hasp', `${q.doors} doors`, q.doors, 0, { lb: 0.5 });
+  add('Fasteners & hardware', 'padlock', `${q.doors} doors (ask for keyed alike)`, q.doors, 0, { lb: 0.5 });
+
+  // ---- tools (the guide's "Tools" step)
+  for (const t of houseTools({ pvc: P.cladding === 'pvc', screens: !!q.screens, rain: !!rn, concrete: q.concreteFt3 > 0 || !!rn })) {
+    for (const [key, n] of t.items) add('Tools', key, t.name, n, 0, { lb: TOOL_LB[key] || 1 });
+  }
 
   // ---- local (not purchased)
   const bags = lines.filter((l) => l.key === 'cement').reduce((t, l) => t + l.buy, 0);
@@ -292,8 +299,40 @@ export function computeBOM(d, P, prices) {
     { name: 'Compacted sand / coral fill inside the tank base', qty: rn ? Math.ceil(rn.tank.fillFt3) : 0, unit: 'ft³' },
   ];
 
-  const ORDER = ['Floor slab', 'Framing lumber', 'Plywood', 'Roofing & siding', 'Windows', 'Insect screens', 'Gutters & water tank', 'Fasteners & hardware'];
+  const ORDER = ['Floor slab', 'Framing lumber', 'Plywood', 'Roofing & siding', 'Windows', 'Insect screens', 'Gutters & water tank', 'Fasteners & hardware', 'Tools'];
   return { lines, cuts, tinBins: tin.bins, local, meshSpareFt, ...totals(lines, P, ORDER) };
+}
+
+// The house is built in two phases: the house first, then the gutters and
+// water tank. `base` is the BOM of the same design without the rainwater
+// system. Its lines are phase 1; phase 2 is the gutters & tank section of the
+// full BOM, plus whatever else the full design needs beyond phase 1 (the
+// pipe standoffs, the screws that fix them, the tools for cutting pipe).
+export const PHASES = { 1: 'Phase 1: the house', 2: 'Phase 2: gutters & water tank' };
+export function phaseBOM(full, base, P) {
+  const RAIN = 'Gutters & water tank';
+  const lines = base.lines.map((l) => ({ ...l, phase: 1 }));
+  const have = {};
+  for (const l of base.lines) have[l.key] = (have[l.key] || 0) + l.buy;
+  const more = new Map();
+  for (const l of full.lines) {
+    if (l.section === RAIN) lines.push({ ...l, phase: 2 });
+    else {
+      const e = more.get(l.key) || { l, buy: 0 };
+      e.buy += l.buy;
+      more.set(l.key, e);
+    }
+  }
+  for (const { l, buy } of more.values()) {
+    const n = buy - (have[l.key] || 0);
+    if (n <= 0) continue;
+    lines.push({
+      ...l, section: RAIN, phase: 2, tool: l.section === 'Tools', net: n, ov: 0, buy: n, total: n * l.price, lb: (l.lb / l.buy) * n,
+      use: l.section === 'Tools' ? `${l.use} (tool)` : `More than phase 1 needs, for the gutters and tank (${l.use})`,
+    });
+  }
+  const ORDER = [...base.sections, RAIN];
+  return { ...full, lines, phased: true, ...totals(lines, P, ORDER) };
 }
 
 // Toilet house. houseMeshSpareFt: wire mesh left on the house's roll.
@@ -409,8 +448,9 @@ export function computeToiletBOM(d, P, prices, { houseMeshSpareFt = 0 } = {}) {
 export function shoppingList(bom) {
   const m = new Map();
   for (const l of bom.lines) {
-    const e = m.get(l.key) || { key: l.key, name: l.name, buy: 0, price: l.price, unit: l.unit, est: l.est, quote: l.quote };
+    const e = m.get(l.key) || { key: l.key, section: l.section, name: l.name, buy: 0, price: l.price, unit: l.unit, est: l.est, quote: l.quote, store: l.store, uses: [] };
     e.buy += l.buy;
+    e.uses.push(l.use);
     m.set(l.key, e);
   }
   return [...m.values()].map((e) => ({ ...e, total: e.buy * e.price }));

@@ -1,0 +1,12 @@
+{
+  "name": "house-builder",
+  "private": true,
+  "type": "module",
+  "description": "Static app; Node is only used to generate the printed shopping lists.",
+  "scripts": {
+    "shopping": "node scripts/shopping-list.mjs"
+  },
+  "devDependencies": {
+    "three": "0.170.0"
+  }
+}
